@@ -1,5 +1,43 @@
 import dotenv from 'dotenv';
+import { connectKafka, consumer, producer } from './config/kafka';
+import { shouldSendNotification } from './services/aggregationService';
+import { logNotification } from './services/dynamoService';
+
 dotenv.config();
 
-console.log('Processing Service Starting...');
-// We will add Kafka Consumer logic here later
+const startService = async () => {
+  console.log('🧠 Processing Service Starting...');
+
+  await connectKafka();
+
+  await consumer.run({
+    eachMessage: async ({ topic, partition, message }) => {
+      const rawValue = message.value?.toString();
+      if (!rawValue) return;
+
+      const event = JSON.parse(rawValue);
+      console.log(`📥 Received Event: ${event.type} for ${event.targetId}`);
+
+      // 1. Aggregation / Rate Limiting Check (Redis)
+      const isAllowed = await shouldSendNotification(event.targetId, event.type);
+
+      if (!isAllowed) {
+        await logNotification(event, 'SUPPRESSED');
+        return;
+      }
+
+      // 2. (Future) Preference Check - Skipped for now to keep it simple
+
+      // 3. Send to Final Delivery Topic
+      await producer.send({
+        topic: 'ready-notifications',
+        messages: [{ value: JSON.stringify(event) }],
+      });
+
+      console.log(`✅ Approved & Forwarded: ${event.type}`);
+      await logNotification(event, 'SENT');
+    },
+  });
+};
+
+startService();
