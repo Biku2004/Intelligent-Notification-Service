@@ -7,8 +7,7 @@ const client = new DynamoDBClient({
   credentials: { accessKeyId: 'dummy', secretAccessKey: 'dummy' },
 });
 
-export const logNotification = async (event: any, status: 'SENT' | 'SUPPRESSED') => {
-  const command = new PutItemCommand({
+export const logNotification = async (event: any, status: 'SENT' | 'SUPPRESSED' | 'FILTERED_PREFS') => {  const command = new PutItemCommand({
     TableName: 'NotificationLogs', // We need to create this table later!
     Item: {
       id: { S: uuidv4() },

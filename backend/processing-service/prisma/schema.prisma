@@ -1,0 +1,33 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  name            String?
+  createdAt       DateTime @default(now())
+  preferences     NotificationPreference?
+}
+
+model NotificationPreference {
+  id              String  @id @default(uuid())
+  userId          String  @unique
+  user            User    @relation(fields: [userId], references: [id])
+
+  emailEnabled    Boolean @default(true)
+  smsEnabled      Boolean @default(false)
+  pushEnabled     Boolean @default(true)
+
+  marketing       Boolean @default(false)
+  activity        Boolean @default(true)
+
+  dndEnabled      Boolean @default(false)
+  dndStartTime    String? // "22:00"
+  dndEndTime      String? // "08:00"
+}
