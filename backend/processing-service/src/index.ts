@@ -8,6 +8,7 @@ import {
 import { logNotification } from './services/dynamoService';
 import { checkUserPreferences } from './services/preferenceService';
 import { NotificationEvent, KAFKA_TOPICS } from '../../shared/types';
+import { ensureTopicsExist } from './config/initTopics';
 
 dotenv.config();
 
@@ -218,6 +219,9 @@ async function startService() {
   console.log('📊 Priority Queue System Enabled');
 
   try {
+    // Ensure Kafka topics exist
+    await ensureTopicsExist(kafka);
+
     // Connect producer
     await producer.connect();
     console.log('✅ Kafka producer connected');
