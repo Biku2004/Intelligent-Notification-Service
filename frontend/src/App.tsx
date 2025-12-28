@@ -1,35 +1,36 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { SocketProvider } from './context/SocketProvider';
+import { Navbar } from './components/Navbar';
+import axios from 'axios';
 
 function App() {
-  const [count, setCount] = useState(0)
+  // A button to simulate "Someone liking MY post" (for testing)
+  const handleTestTrigger = async () => {
+    await axios.post('http://localhost:3000/api/events/trigger', {
+      type: 'LIKE',
+      actorId: 'user_Random',
+      targetId: 'user_999', // Matches the ID in SocketContext
+      metadata: { postId: 123 }
+    });
+  };
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <SocketProvider>
+      <div className="min-h-screen bg-gray-100">
+        <Navbar />
+        <div className="p-10 flex flex-col items-center gap-5">
+          <h2 className="text-2xl font-bold">Welcome to the Feed</h2>
+          <p>Click the button below to simulate another user liking your photo.</p>
+          
+          <button 
+            onClick={handleTestTrigger}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+          >
+            Trigger "Like" Event
+          </button>
+        </div>
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    </SocketProvider>
+  );
 }
 
-export default App
+export default App;

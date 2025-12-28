@@ -5,9 +5,17 @@ const kafka = new Kafka({
   clientId: 'processing-service',
   brokers: [process.env.KAFKA_BROKER || 'localhost:9092'],
   logLevel: logLevel.ERROR,
+  retry: {
+    initialRetryTime: 100,
+    retries: 8,
+  },
 });
 
-export const consumer = kafka.consumer({ groupId: 'processing-group' });
+export const consumer = kafka.consumer({ 
+  groupId: 'processing-group',
+  sessionTimeout: 30000,
+  heartbeatInterval: 3000,
+});
 export const producer = kafka.producer();
 
 export const connectKafka = async () => {

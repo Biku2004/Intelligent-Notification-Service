@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
 import { connectKafka } from './config/kafka';
 import eventRoutes from './routes/eventRoutes';
@@ -7,6 +8,12 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// CORS middleware - allow frontend to access
+app.use(cors({
+  origin: 'http://localhost:5173',
+  credentials: true
+}));
 
 // Middleware to parse JSON bodies
 app.use(express.json());
