@@ -1,8 +1,8 @@
 {
-  "name": "ingestion-service",
+  "name": "notification-api",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Notification History API Service",
+  "main": "dist/app.js",
   "scripts": {
     "start": "node dist/app.js",
     "dev": "nodemon",
@@ -12,22 +12,18 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
+    "@prisma/client": "^7.2.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "kafkajs": "^2.2.4",
-    "uuid": "^13.0.0"
+    "express": "^5.2.1"
   },
   "devDependencies": {
-    "@prisma/client": "^5.10.0",
-    "@types/cors": "^2.8.19",
+    "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.3",
-    "@types/uuid": "^10.0.0",
     "nodemon": "^3.1.11",
-    "prisma": "^5.10.0",
+    "prisma": "^7.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
