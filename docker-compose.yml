@@ -1,6 +1,6 @@
 services:
   # ----------------------------
-  # 1. PostgreSQL + UI (PgAdmin)
+  # 1. PostgreSQL (Production-Ready)
   # ----------------------------
   postgres:
     image: postgres:15-alpine
@@ -8,80 +8,87 @@ services:
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: password123
-      POSTGRES_DB: notification_users
+      POSTGRES_DB: notification_system
+      # Auto-create database on startup
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.utf8"
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - notif-network
-
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: notif_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "5050:80"
-    depends_on:
-      - postgres
+      - ./infra/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d notification_system"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
     networks:
       - notif-network
 
   # ----------------------------
-  # 2. Redis + UI (RedisInsight)
+  # 2. Redis (Production-Ready)
   # ----------------------------
   redis:
-    image: redis/redis-stack:latest
+    image: redis:7-alpine
     container_name: notif_redis
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --tcp-backlog 511
     ports:
-      - "6379:6379"  # Redis Port
-      - "8001:8001"  # RedisInsight UI Port
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
     networks:
       - notif-network
 
   # ----------------------------
-  # 3. DynamoDB + UI
+  # 3. DynamoDB Local (Optional)
   # ----------------------------
   dynamodb:
     image: amazon/dynamodb-local
     container_name: notif_dynamodb
-    command: "-jar DynamoDBLocal.jar -sharedDb"
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data"
     ports:
       - "8000:8000"
     volumes:
       - dynamodb_data:/home/dynamodblocal/data
-    networks:
-      - notif-network
-
-  dynamodb-admin:
-    image: aaronshaf/dynamodb-admin
-    container_name: notif_dynamodb_ui
-    environment:
-      DYNAMO_ENDPOINT: "http://dynamodb:8000"
-      AWS_REGION: "us-east-1"
-    ports:
-      - "8002:8001" # Mapped to 8002 because Redis uses 8001
-    depends_on:
-      - dynamodb
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
     networks:
       - notif-network
 
   # ----------------------------
-  # 4. Kafka (Kraft) + UI
+  # 4. Kafka (KRaft Mode - Production)
   # ----------------------------
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: notif_kafka
     hostname: kafka
+    user: root
     ports:
       - "9092:9092"
+      - "9101:9101"  # JMX metrics
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      # This line allows your Host (Node.js) to talk to 'localhost:9092'
-      # And Docker containers (Kafka UI) to talk to 'kafka:29092'
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
@@ -93,31 +100,92 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka_data:/tmp/kraft-combined-logs
     healthcheck:
-      test: nc -z localhost 9092 || exit 1
+      test: ["CMD-SHELL", "nc -z localhost 9092 || exit 1"]
       start_period: 15s
-      interval: 5s
+      interval: 10s
+      timeout: 5s
       retries: 10
+    restart: unless-stopped
     networks:
       - notif-network
 
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: notif_kafka_ui
-    ports:
-      - "8080:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
-    depends_on:
-      - kafka
-    networks:
-      - notif-network
+  # ----------------------------
+  # 5. Optional: Management UIs (Development Only)
+  # ----------------------------
+  # Uncomment these services for local development/debugging
+  # Remove or comment out in production deployments
+
+  # pgadmin:
+  #   image: dpage/pgadmin4
+  #   container_name: notif_pgadmin
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@admin.com
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #     PGADMIN_CONFIG_SERVER_MODE: "False"
+  #     PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+  #   ports:
+  #     - "5050:80"
+  #   depends_on:
+  #     - postgres
+  #   networks:
+  #     - notif-network
+
+  # redis-commander:
+  #   image: rediscommander/redis-commander:latest
+  #   container_name: notif_redis_ui
+  #   environment:
+  #     REDIS_HOSTS: local:redis:6379
+  #   ports:
+  #     - "8081:8081"
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - notif-network
+
+  # kafka-ui:
+  #   image: provectuslabs/kafka-ui:latest
+  #   container_name: notif_kafka_ui
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     KAFKA_CLUSTERS_0_NAME: local
+  #     KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+  #   depends_on:
+  #     - kafka
+  #   networks:
+  #     - notif-network
+
+  # dynamodb-admin:
+  #   image: aaronshaf/dynamodb-admin
+  #   container_name: notif_dynamodb_ui
+  #   environment:
+  #     DYNAMO_ENDPOINT: "http://dynamodb:8000"
+  #     AWS_REGION: "us-east-1"
+  #   ports:
+  #     - "8002:8001"
+  #   depends_on:
+  #     - dynamodb
+  #   networks:
+  #     - notif-network
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  kafka_data:
+    driver: local
   dynamodb_data:
+    driver: local
 
 networks:
   notif-network:
