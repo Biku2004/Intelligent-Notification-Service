@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { SocketProvider } from './context/SocketProvider';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './hooks/useAuth';
+import { useSocket } from './hooks/useSocket';
 import { Navbar } from './components/Navbar';
 import { Feed } from './components/Feed';
 import { NotificationPreferences } from './components/NotificationPreferences';
@@ -9,41 +10,64 @@ import { UserProfile } from './components/UserProfile';
 import { PostCreation } from './components/PostCreation';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
-import axios from 'axios';
+import { ToastContainer } from './components/ToastNotification';
+import type { Toast } from './components/ToastNotification';
+import { NotificationTester } from './components/NotificationTester';
 
-const API_BASE = 'http://localhost:3001';
-
-type Page = 'feed' | 'preferences' | 'profile';
+type Page = 'feed' | 'preferences' | 'profile' | 'tester';
 
 function AppContent() {
   const { user } = useAuth();
+  const { notifications } = useSocket();
   const [currentPage, setCurrentPage] = useState<Page>('feed');
   const [showPostCreation, setShowPostCreation] = useState(false);
   const [showAuth, setShowAuth] = useState<'login' | 'register'>('login');
   const [refreshFeed, setRefreshFeed] = useState(0);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // Test trigger function for development
-  const handleTestTrigger = async (type: 'LIKE' | 'COMMENT' | 'FOLLOW') => {
-    try {
-      await axios.post(`${API_BASE}/api/events`, {
-        type,
-        priority: type === 'COMMENT' ? 'HIGH' : 'LOW',
-        actorId: 'test_user_123',
-        actorName: 'Test User',
-        actorAvatar: 'https://i.pravatar.cc/150?img=68',
-        targetId: user?.id || 'user_999',
-        targetType: 'POST',
-        targetEntityId: 'post_123',
-        message: type === 'LIKE' ? 'liked your post' : type === 'COMMENT' ? 'Nice post!' : 'started following you',
-        timestamp: new Date().toISOString(),
-        metadata: {
-          postUrl: '/posts/123'
-        }
-      });
-      console.log(`✅ ${type} notification triggered`);
-    } catch (error) {
-      console.error('Failed to trigger notification:', error);
+  // Handle incoming notifications and show toasts for likes (1-5 count)
+  useEffect(() => {
+    if (notifications.length === 0) return;
+    
+    const latestNotification = notifications[0];
+    
+    // Show toast for LIKE with count 1-5, COMMENT always, FOLLOW 1-3
+    const shouldShowToast = 
+      (latestNotification.type === 'LIKE' && (latestNotification.metadata?.aggregatedCount || 1) <= 5) ||
+      (latestNotification.type === 'COMMENT') ||
+      (latestNotification.type === 'COMMENT_REPLY') ||
+      (latestNotification.type === 'FOLLOW' && (latestNotification.metadata?.aggregatedCount || 1) <= 3) ||
+      (latestNotification.type === 'BELL_POST');
+
+    if (shouldShowToast) {
+      const toastType = latestNotification.type.toLowerCase();
+      const validTypes = ['like', 'comment', 'follow', 'bell_post'];
+      const mappedType = validTypes.includes(toastType) ? toastType : 'like';
+      
+      const newToast: Toast = {
+        id: latestNotification.id,
+        type: mappedType as Toast['type'],
+        message: latestNotification.message,
+        actorName: latestNotification.actorName || 'Someone',
+        actorAvatar: latestNotification.actorAvatar,
+        imageUrl: latestNotification.imageUrl,
+        count: latestNotification.metadata?.aggregatedCount,
+      };
+
+      // Use setTimeout to avoid setState in effect
+      setTimeout(() => {
+        setToasts(prev => [newToast, ...prev]);
+
+        // Auto-remove toast after 5 seconds
+        setTimeout(() => {
+          setToasts(prev => prev.filter(t => t.id !== newToast.id));
+        }, 5000);
+      }, 0);
     }
+  }, [notifications.length]); // Only depend on length to avoid infinite loop
+
+  const handleCloseToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
   };
 
   // Show auth screen if not logged in
@@ -68,11 +92,16 @@ function AppContent() {
         onProfileClick={() => setCurrentPage('profile')}
       />
 
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toasts} onClose={handleCloseToast} />
+
       <main className="pt-20 pb-8">
         {currentPage === 'feed' ? (
           <Feed key={refreshFeed} />
         ) : currentPage === 'preferences' ? (
           <NotificationPreferences />
+        ) : currentPage === 'tester' ? (
+          <NotificationTester />
         ) : (
           <UserProfile userId={user.id} />
         )}
@@ -88,38 +117,6 @@ function AppContent() {
           }}
         />
       )}
-
-      {/* Test Control Panel (Development Only) */}
-      {currentPage === 'feed' && (
-        <div className="fixed bottom-4 right-4 bg-white rounded-lg shadow-2xl p-4 border-2 border-purple-200 z-40">
-          <h3 className="text-sm font-bold text-gray-700 mb-3 text-center">
-            🧪 Test Panel
-          </h3>
-          <div className="flex flex-col gap-2">
-            <button 
-              onClick={() => handleTestTrigger('LIKE')}
-              className="w-full px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm font-medium"
-            >
-              ❤️ Trigger LIKE
-            </button>
-            <button 
-              onClick={() => handleTestTrigger('COMMENT')}
-              className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-sm font-medium"
-            >
-              💬 Trigger COMMENT
-            </button>
-            <button 
-              onClick={() => handleTestTrigger('FOLLOW')}
-              className="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm font-medium"
-            >
-              ➕ Trigger FOLLOW
-            </button>
-          </div>
-          <p className="text-xs text-gray-500 mt-3 text-center">
-            Events → Kafka → Processing → Socket
-          </p>
-        </div>
-      )}
     </div>
   );
 }
@@ -131,59 +128,6 @@ function App() {
         <AppContent />
       </SocketProvider>
     </AuthProvider>
-  );
-}
-
-export default App;
-
-  return (
-    <SocketProvider>
-      <div className="min-h-screen bg-gray-100">
-        <Navbar onNavigate={setCurrentPage} currentPage={currentPage} />
-        
-        <main className="max-w-7xl mx-auto px-4 py-6">
-          {currentPage === 'feed' ? (
-            <>
-              {/* Feed Content */}
-              <Feed />
-              
-              {/* Test Controls (Development Only) */}
-              <div className="fixed bottom-6 right-6 bg-white rounded-lg shadow-2xl p-6 border-2 border-purple-200">
-                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                  Test Notifications
-                </h3>
-                <div className="space-y-2">
-                  <button 
-                    onClick={() => handleTestTrigger('LIKE')}
-                    className="w-full px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm font-medium"
-                  >
-                    ❤️ Trigger LIKE
-                  </button>
-                  <button 
-                    onClick={() => handleTestTrigger('COMMENT')}
-                    className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-sm font-medium"
-                  >
-                    💬 Trigger COMMENT
-                  </button>
-                  <button 
-                    onClick={() => handleTestTrigger('FOLLOW')}
-                    className="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm font-medium"
-                  >
-                    ➕ Trigger FOLLOW
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-3 text-center">
-                  Events → Kafka → Processing → Socket
-                </p>
-              </div>
-            </>
-          ) : (
-            <NotificationPreferences />
-          )}
-        </main>
-      </div>
-    </SocketProvider>
   );
 }
 

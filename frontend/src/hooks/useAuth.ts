@@ -3,8 +3,8 @@
  * Custom hook to access authentication context
  */
 import { useContext } from 'react';
-import { AuthContext } from './AuthContext';
-import type { AuthContextType } from './AuthContext';
+import { AuthContext } from '../context/AuthContext';
+import type { AuthContextType } from '../context/AuthContext';
 
 export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);

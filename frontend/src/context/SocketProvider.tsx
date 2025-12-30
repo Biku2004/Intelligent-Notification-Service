@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
-import type { NotificationEvent } from '../types'; // Fix 1: "import type"
-import { SocketContext } from './socketContextState'; // Import the separated context
-
-const CURRENT_USER_ID = 'user_999';
+import type { NotificationEvent } from '../types';
+import { SocketContext } from './socketContextState';
+import { useAuth } from '../hooks/useAuth';
 
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Initialize Socket Lazily
+  const { user } = useAuth();
+  
+  // Initialize Socket Lazily - Socket service runs on port 4000
   const [socket] = useState(() => io('http://localhost:4000', { 
     autoConnect: false 
   }));
@@ -15,11 +16,20 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
+    if (!user) {
+      socket.disconnect();
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
     socket.connect();
-    socket.emit('join_room', CURRENT_USER_ID);
+    socket.emit('join_room', user.id);
+
+    console.log('✅ Socket connected for user:', user.id);
 
     const handleNotification = (data: NotificationEvent) => {
-      console.log('🔔 New Notification:', data);
+      console.log('🔔 Notification received:', data);
       setNotifications((prev) => [data, ...prev]);
       setUnreadCount((prev) => prev + 1);
     };
@@ -30,12 +40,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       socket.off('notification', handleNotification);
       socket.disconnect();
     };
-  }, [socket]);
+  }, [socket, user]);
 
   const markAsRead = () => setUnreadCount(0);
+  
+  const clearNotification = (notificationId: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== notificationId));
+  };
 
   return (
-    <SocketContext.Provider value={{ socket, notifications, unreadCount, markAsRead }}>
+    <SocketContext.Provider value={{ socket, notifications, unreadCount, markAsRead, clearNotification }}>
       {children}
     </SocketContext.Provider>
   );

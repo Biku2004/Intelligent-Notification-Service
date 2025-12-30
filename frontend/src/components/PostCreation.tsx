@@ -33,10 +33,19 @@ export const PostCreation: React.FC<PostCreationProps> = ({ onClose, onPostCreat
       setLoading(true);
       setError('');
 
-      const response = await axios.post(`${API_BASE}/api/posts`, {
-        caption,
-        imageUrl
-      });
+      const token = localStorage.getItem('authToken');
+      const response = await axios.post(
+        `${API_BASE}/api/posts`, 
+        {
+          caption,
+          imageUrl
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
 
       if (response.data.success) {
         onPostCreated?.();
