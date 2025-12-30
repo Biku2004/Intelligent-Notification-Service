@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========================================
+// NOTIFICATION HISTORY
+// ========================================
+model NotificationHistory {
+  id              String   @id @default(uuid())
+  userId          String
+  type            String
+  priority        String
+  isAggregated    Boolean  @default(false)
+  aggregatedCount Int      @default(1)
+  title           String
+  message         String
+  isRead          Boolean  @default(false)
+  channels        String[]
+  metadata        Json?
+  createdAt       DateTime @default(now())
+}
+
+// ========================================
+// NOTIFICATION PREFERENCES
+// ========================================
+model NotificationPreference {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  
+  // Channel preferences
+  emailEnabled    Boolean  @default(true)
+  smsEnabled      Boolean  @default(false)
+  pushEnabled     Boolean  @default(true)
+  
+  // Do Not Disturb
+  dndEnabled      Boolean  @default(false)
+  dndStartTime    String?  // HH:mm format
+  dndEndTime      String?  // HH:mm format
+  
+  // Contact info
+  email           String?
+  phone           String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

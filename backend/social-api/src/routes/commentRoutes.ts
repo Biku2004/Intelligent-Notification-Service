@@ -47,7 +47,6 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         postId,
         userId,
         content,
-        gifUrl,
       },
       include: {
         user: {
@@ -141,7 +140,6 @@ router.post('/:commentId/reply', authMiddleware, async (req: AuthRequest, res: R
         postId: parentComment.postId,
         userId,
         content,
-        gifUrl,
         parentId: commentId,
       },
       include: {

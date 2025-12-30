@@ -215,27 +215,17 @@ router.post('/:userId/bell', authMiddleware, async (req: AuthRequest, res: Respo
     let bellEnabled = false;
 
     if (existingBell) {
-      // Toggle or delete
-      if (existingBell.enabled) {
-        await prisma.bellSubscription.update({
-          where: { id: existingBell.id },
-          data: { enabled: false }
-        });
-        bellEnabled = false;
-      } else {
-        await prisma.bellSubscription.update({
-          where: { id: existingBell.id },
-          data: { enabled: true }
-        });
-        bellEnabled = true;
-      }
+      // Delete to disable
+      await prisma.bellSubscription.delete({
+        where: { id: existingBell.id }
+      });
+      bellEnabled = false;
     } else {
       // Create new bell subscription
       await prisma.bellSubscription.create({
         data: {
           subscriberId,
           targetUserId,
-          enabled: true
         }
       });
       bellEnabled = true;

@@ -1,6 +1,6 @@
 // Smart Aggregation Service with Redis-based Batching
 // Implements: "John and 5 others liked your post" logic
-import { redis } from '../config/redis';
+import redis from '../config/redis';
 import { NotificationEvent, NotificationType } from '../../../shared/types';
 
 const AGGREGATION_WINDOW_SECONDS = 120; // 2 minutes

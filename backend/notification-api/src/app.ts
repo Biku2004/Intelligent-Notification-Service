@@ -56,23 +56,16 @@ app.get('/api/notifications/:userId', async (req: Request, res: Response) => {
         take: limitNum,
         select: {
           id: true,
+          userId: true,
           type: true,
           priority: true,
-          actorId: true,
-          actorName: true,
-          actorAvatar: true,
           isAggregated: true,
           aggregatedCount: true,
-          aggregatedIds: true,
           title: true,
           message: true,
-          imageUrl: true,
-          targetType: true,
-          targetId: true,
           isRead: true,
-          readAt: true,
-          deliveryStatus: true,
           channels: true,
+          metadata: true,
           createdAt: true,
         },
       }),
@@ -154,7 +147,6 @@ app.patch('/api/notifications/:id/read', async (req: Request, res: Response) => 
       where: { id },
       data: { 
         isRead: true,
-        readAt: new Date(),
       },
     });
 
@@ -184,7 +176,6 @@ app.patch('/api/notifications/:userId/read-all', async (req: Request, res: Respo
       where: { userId, isRead: false },
       data: { 
         isRead: true,
-        readAt: new Date(),
       },
     });
 

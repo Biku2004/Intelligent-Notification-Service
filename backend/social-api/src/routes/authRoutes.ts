@@ -5,14 +5,14 @@
  */
 import express, { Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import jwt, { Secret, SignOptions } from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
 const prisma = new PrismaClient();
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+const JWT_SECRET: Secret = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_EXPIRES_IN: string = process.env.JWT_EXPIRES_IN || '7d';
 
 /**
  * POST /api/auth/register
@@ -61,9 +61,6 @@ router.post('/register', async (req: AuthRequest, res: Response) => {
             emailEnabled: true,
             smsEnabled: false,
             pushEnabled: true,
-            marketing: false,
-            activity: true,
-            social: true,
             dndEnabled: false,
           }
         }
@@ -80,7 +77,8 @@ router.post('/register', async (req: AuthRequest, res: Response) => {
     });
 
     // Generate JWT
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const signOptions: SignOptions = { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] };
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, signOptions);
 
     res.status(201).json({
       success: true,
@@ -135,7 +133,8 @@ router.post('/login', async (req: AuthRequest, res: Response) => {
     }
 
     // Generate JWT
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const signOptions: SignOptions = { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] };
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, signOptions);
 
     // Remove password from response
     const { password: _, ...userWithoutPassword } = user;

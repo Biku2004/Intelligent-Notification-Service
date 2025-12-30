@@ -56,7 +56,6 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
     const bellSubscribers = await prisma.bellSubscription.findMany({
       where: {
         targetUserId: userId,
-        enabled: true,
       },
       select: {
         subscriberId: true,

@@ -47,7 +47,7 @@ export const startKafkaConsumer = async (io: Server) => {
 
       // Emit to specific user room
       io.to(event.targetId).emit('notification', {
-        id: event.eventId || Date.now().toString(),
+        id: event.id || Date.now().toString(),
         type: event.type,
         priority: event.priority,
         title: event.title || `New ${event.type.toLowerCase()}`,
