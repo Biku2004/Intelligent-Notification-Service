@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Notification History API Service",
   "main": "dist/app.js",
+  "prisma": {
+    "schema": "../processing-service/prisma/schema.prisma"
+  },
   "scripts": {
     "start": "node dist/app.js",
     "dev": "nodemon",
