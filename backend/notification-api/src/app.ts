@@ -33,13 +33,17 @@ app.get('/api/notifications/:userId', async (req: Request, res: Response) => {
     const skip = (pageNum - 1) * limitNum;
 
     // Build filter
-    const where: any = { userId };
+    const where: {
+      userId: string;
+      isRead?: boolean;
+      priority?: string;
+    } = { userId };
     
     if (unreadOnly === 'true') {
       where.isRead = false;
     }
     
-    if (priority) {
+    if (priority && typeof priority === 'string') {
       where.priority = priority;
     }
 
@@ -212,22 +216,30 @@ app.get('/api/notifications/:userId/grouped', async (req: Request, res: Response
       take: 100,
     });
 
+    type NotificationItem = typeof notifications[0];
+    type GroupedType = Record<string, NotificationItem[]>;
+
     // Group by type
-    const grouped = notifications.reduce((acc: any, notif) => {
-      if (!acc[notif.type]) {
-        acc[notif.type] = [];
-      }
-      acc[notif.type].push(notif);
-      return acc;
-    }, {});
+    const grouped: GroupedType = notifications.reduce(
+      (acc: GroupedType, notif: NotificationItem) => {
+        if (!acc[notif.type]) {
+          acc[notif.type] = [];
+        }
+        acc[notif.type].push(notif);
+        return acc;
+      },
+      {} as GroupedType
+    );
 
     // Calculate stats
-    const stats = Object.entries(grouped).map(([type, items]: [string, any]) => ({
-      type,
-      count: items.length,
-      unread: items.filter((n: any) => !n.isRead).length,
-      latest: items[0]?.createdAt,
-    }));
+    const stats = (Object.entries(grouped) as [string, NotificationItem[]][]).map(
+      ([type, items]) => ({
+        type,
+        count: items.length,
+        unread: items.filter((n) => !n.isRead).length,
+        latest: items[0]?.createdAt,
+      })
+    );
 
     res.json({
       success: true,
