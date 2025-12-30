@@ -1,56 +1,76 @@
-import React, { useState } from 'react';
-import { Bell, MessageSquare, Heart } from 'lucide-react';
-import { useSocket } from '../hooks/useSocket';
+import React from 'react';
+import { Home, Search, PlusSquare, User, Settings } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 
-export const Navbar = () => {
-  const { unreadCount, notifications, markAsRead } = useSocket()!;
-  const [isOpen, setIsOpen] = useState(false);
+interface NavbarProps {
+  onNavigate: (page: 'feed' | 'preferences' | 'profile') => void;
+  currentPage: string;
+  onCreatePost: () => void;
+  onProfileClick: () => void;
+}
 
-  const handleToggle = () => {
-    setIsOpen(!isOpen);
-    if (!isOpen) markAsRead();
-  };
-
+export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onCreatePost, onProfileClick }) => {
   return (
-    <nav className="p-4 bg-black text-white flex justify-between items-center">
-      <h1 className="text-xl font-bold">InstaNotify</h1>
-      
-      {/* Bell Container */}
-      <div className="relative">
-        <button onClick={handleToggle} className="relative p-2 hover:bg-gray-800 rounded-full">
-          <Bell size={24} />
-          {unreadCount > 0 && (
-            <span className="absolute top-0 right-0 bg-red-500 text-xs w-5 h-5 flex items-center justify-center rounded-full">
-              {unreadCount}
-            </span>
-          )}
-        </button>
-
-        {/* Dropdown Feed */}
-        {isOpen && (
-          <div className="absolute right-0 mt-2 w-80 bg-white text-black shadow-xl rounded-lg overflow-hidden z-50">
-            <div className="p-3 font-bold border-b">Notifications</div>
-            <div className="max-h-96 overflow-y-auto">
-              {notifications.length === 0 ? (
-                <div className="p-4 text-center text-gray-500">No notifications yet</div>
-              ) : (
-                notifications.map((n, i) => (
-                  <div key={i} className="p-3 border-b hover:bg-gray-50 flex items-center gap-3">
-                    <div className="p-2 bg-blue-100 rounded-full text-blue-600">
-                      {n.type === 'LIKE' ? <Heart size={16} /> : <MessageSquare size={16} />}
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">
-                        {n.actorId} {n.type === 'LIKE' ? 'liked your post' : 'commented'}
-                      </p>
-                      <p className="text-xs text-gray-400">Just now</p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+    <nav className="sticky top-0 z-50 bg-black text-white shadow-lg">
+      <div className="max-w-7xl mx-auto px-4">
+        <div className="flex justify-between items-center h-16">
+          {/* Logo */}
+          <div className="flex items-center">
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+              InstaNotify
+            </h1>
           </div>
-        )}
+
+          {/* Navigation Icons */}
+          <div className="flex items-center gap-6">
+            <button
+              onClick={() => onNavigate('feed')}
+              className={`p-2 rounded-lg transition-colors ${
+                currentPage === 'feed' ? 'bg-gray-800' : 'hover:bg-gray-800'
+              }`}
+              aria-label="Home"
+            >
+              <Home size={24} />
+            </button>
+
+            <button
+              className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+              aria-label="Search"
+            >
+              <Search size={24} />
+            </button>
+
+            <button
+              onClick={onCreatePost}
+              className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+              aria-label="Create Post"
+            >
+              <PlusSquare size={24} />
+            </button>
+
+            <NotificationBell />
+
+            <button
+              onClick={() => onNavigate('preferences')}
+              className={`p-2 rounded-lg transition-colors ${
+                currentPage === 'preferences' ? 'bg-gray-800' : 'hover:bg-gray-800'
+              }`}
+              aria-label="Settings"
+            >
+              <Settings size={24} />
+            </button>
+
+            <button
+              onClick={onProfileClick}
+              className={`p-2 rounded-lg transition-colors ${
+                currentPage === 'profile' ? 'bg-gray-800' : 'hover:bg-gray-800'
+              }`}
+              aria-label="Profile"
+            >
+              <User size={24} />
+            </button>
+          </div>
+        </div>
       </div>
     </nav>
   );
