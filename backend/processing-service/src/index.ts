@@ -7,10 +7,29 @@ import {
 } from './services/aggregationService';
 import { logNotification } from './services/dynamoService';
 import { checkUserPreferences } from './services/preferenceService';
-import { NotificationEvent, KAFKA_TOPICS } from '../../shared/types';
+import { NotificationEvent, NotificationPriority, KAFKA_TOPICS } from '../../shared/types';
 import { ensureTopicsExist } from './config/initTopics';
 
 dotenv.config();
+
+/**
+ * Determine delivery channels based on notification priority
+ * CRITICAL: All channels (maximum reach for security/OTP)
+ * HIGH: Email + Push (social notifications)
+ * LOW: Push only (marketing, digest)
+ */
+function getChannelsForPriority(priority: NotificationPriority): ('PUSH' | 'EMAIL' | 'SMS')[] {
+  switch (priority) {
+    case 'CRITICAL':
+      return ['PUSH', 'EMAIL', 'SMS'];  // Maximum reach for critical alerts
+    case 'HIGH':
+      return ['PUSH', 'EMAIL'];         // Email + Push for social interactions
+    case 'LOW':
+      return ['PUSH'];                  // Push only to minimize costs
+    default:
+      return ['PUSH'];                  // Fallback to push only
+  }
+}
 
 const kafka = new Kafka({
   clientId: 'processing-service',
@@ -98,7 +117,21 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
       console.log(`📊 Aggregated notification: ${agg.count} events`);
     }
 
-    // 4. Send to delivery topic
+    // 4. Determine delivery channels based on priority
+    const channels = getChannelsForPriority(finalEvent.priority);
+    
+    // Add channels to metadata
+    finalEvent = {
+      ...finalEvent,
+      metadata: {
+        ...finalEvent.metadata,
+        channels: channels,
+      },
+    };
+
+    console.log(`📡 [${finalEvent.priority}] Channels: [${channels.join(', ')}]`);
+
+    // 5. Send to delivery topic
     await producer.send({
       topic: KAFKA_TOPICS.READY,
       messages: [{
@@ -111,7 +144,7 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
       }],
     });
 
-    // 5. Log to DynamoDB
+    // 6. Log to DynamoDB
     await logNotification(finalEvent, 'SENT');
     console.log(`✅ [${event.priority}] Sent: ${event.type} for ${event.targetId}`);
 

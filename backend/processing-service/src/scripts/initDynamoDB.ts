@@ -1,10 +1,10 @@
 // DynamoDB Table Initialization Script
-import { DynamoDB } from 'aws-sdk';
+import { DynamoDBClient, CreateTableCommand, CreateTableCommandInput } from '@aws-sdk/client-dynamodb';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const dynamodb = new DynamoDB({
+const client = new DynamoDBClient({
   region: process.env.AWS_REGION || 'us-east-1',
   endpoint: process.env.DYNAMO_ENDPOINT || 'http://localhost:8000',
   credentials: {
@@ -14,7 +14,7 @@ const dynamodb = new DynamoDB({
 });
 
 const createNotificationLogsTable = async () => {
-  const params: DynamoDB.CreateTableInput = {
+  const params: CreateTableCommandInput = {
     TableName: 'NotificationLogs',
     KeySchema: [
       { AttributeName: 'id', KeyType: 'HASH' }, // Partition key
@@ -59,10 +59,11 @@ const createNotificationLogsTable = async () => {
   };
 
   try {
-    await dynamodb.createTable(params).promise();
+    const command = new CreateTableCommand(params);
+    await client.send(command);
     console.log('✅ NotificationLogs table created successfully');
   } catch (error: any) {
-    if (error.code === 'ResourceInUseException') {
+    if (error.name === 'ResourceInUseException') {
       console.log('⚠️  NotificationLogs table already exists');
     } else {
       console.error('❌ Error creating table:', error);
