@@ -16,8 +16,6 @@ A scalable, real-time notification delivery platform with Instagram-like social 
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
-- [API Documentation](#api-documentation)
-- [Services](#services)
 
 ## 🎯 Overview
 
@@ -26,31 +24,39 @@ An enterprise-grade notification system that combines real-time delivery, intell
 **Key Capabilities:**
 - 🚀 Real-time push notifications via WebSocket
 - 📧 Multi-channel delivery (Push, Email, SMS)
-- 🤖 Smart notification aggregation ("John and 5 others liked your post")
-- 🔔 Priority-based routing (CRITICAL, HIGH, LOW)
+- 🤖 Smart notification aggregation with instant feedback (1-2 events instant, 3+ aggregated)
+- ⚡ Priority-based routing (CRITICAL, HIGH, LOW)
 - 👤 Complete social platform (Posts, Comments, Likes, Follows)
+- 🔔 Bell notification subscriptions (YouTube-style)
 - 🔐 JWT authentication with bcrypt password hashing
 - 📊 User preferences and Do Not Disturb mode
-- ⚡ Event-driven architecture with Apache Kafka
+- ⏱️ Intelligent aggregation windows (60s with smart delivery)
+- 🎯 Event-driven architecture with Apache Kafka
 
 ## ✨ Features
 
 ### Notification System
-- **Real-time Delivery**: WebSocket-based instant notifications
+- **Real-time Delivery**: WebSocket-based instant notifications (<100ms latency)
 - **Multi-Channel**: Push, Email (SendGrid), SMS (Twilio)
-- **Smart Aggregation**: Batches similar notifications intelligently
-- **Priority Routing**: Critical notifications bypass aggregation
+- **Smart Aggregation**: Intelligent batching with instant feedback
+  - 1-2 events: Instant delivery (no delay)
+  - 3-49 events: Aggregated after 60 seconds
+  - 50+ events: Instant delivery with aggregation
+- **Priority Routing**: CRITICAL (instant), HIGH (social interactions), LOW (marketing)
+- **Bell Notifications**: YouTube-style subscriptions for user posts
 - **DND Mode**: Customizable quiet hours
 - **Read/Unread Tracking**: Mark individual or all as read
 - **Notification History**: Persistent storage with pagination
 
 ### Social Platform
-- **User Management**: Registration, login, profile management
-- **Posts**: Create, view, delete posts with images
-- **Engagement**: Like/unlike posts, comment with nested replies
-- **Social Graph**: Follow/unfollow users, view followers/following
-- **Bell Subscriptions**: Get notified for specific user's posts
+- **User Management**: Registration, login, profile management with avatars
+- **Posts**: Create, view, delete posts with images and captions
+- **Engagement**: Like/unlike posts (HIGH priority notifications), comment with nested replies
+- **Social Graph**: Follow/unfollow users (HIGH priority notifications), view followers/following
+- **Bell Subscriptions**: YouTube-style notifications for specific user's posts
 - **User Search**: Find users by username or name
+- **Profile Pages**: View user posts, followers, following, and statistics
+- **Real-time Updates**: Instant notification delivery for social interactions
 
 ### Developer Experience
 - **RESTful APIs**: Well-documented endpoints with examples
@@ -243,11 +249,14 @@ notification-system/
 │   │   │   ├── Login.tsx           # Login form
 │   │   │   ├── Register.tsx        # Registration form
 │   │   │   ├── Navbar.tsx          # Navigation bar
-│   │   │   ├── Feed.tsx            # Post feed
-│   │   │   ├── UserProfile.tsx     # User profile page
+│   │   │   ├── Feed.tsx            # Post feed with real-time updates
+│   │   │   ├── UserProfile.tsx     # User profile with bell toggle
 │   │   │   ├── PostCreation.tsx    # Create post modal
+│   │   │   ├── PostTester.tsx      # Inline notification tester
+│   │   │   ├── BellToggle.tsx      # Bell subscription component
 │   │   │   ├── NotificationBell.tsx # Notification dropdown
 │   │   │   ├── NotificationItem.tsx # Notification card
+│   │   │   ├── NotificationTester.tsx # Testing interface
 │   │   │   └── NotificationPreferences.tsx # Settings
 │   │   ├── context/
 │   │   │   ├── AuthContext.tsx     # Auth state
@@ -265,7 +274,6 @@ notification-system/
 │
 ├── infra/                          # Infrastructure configs
 ├── docker-compose.yml              # Kafka & Zookeeper
-├── API_DOCUMENTATION.md            # Complete API docs
 ├── BACKEND_CONNECTIONS.md          # Service connections
 └── README.md                       # This file
 ```
@@ -482,118 +490,7 @@ curl -X POST http://localhost:3003/api/auth/login \
 | GET | `/api/preferences/:userId` | Get preferences |
 | PATCH | `/api/preferences/:userId` | Update preferences |
 
-**Complete API documentation**: [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
 
-## 🔧 Services
-
-### 1. Ingestion Service (Port 3001)
-**Purpose**: Event ingestion endpoint for testing  
-**Tech**: Express, KafkaJS  
-**Function**: Accepts notification events and publishes to Kafka
-
-### 2. Processing Service
-**Purpose**: Core notification processor  
-**Tech**: KafkaJS, Prisma, Redis  
-**Functions**:
-- Consumes events from Kafka
-- Checks user preferences
-- Aggregates similar notifications
-- Routes by priority
-- Stores to PostgreSQL
-
-### 3. Socket Service (Port 3004)
-**Purpose**: Real-time push delivery  
-**Tech**: Socket.io, KafkaJS  
-**Function**: Delivers notifications via WebSocket
-
-### 4. Email Service
-**Purpose**: Email delivery  
-**Tech**: SendGrid SDK, KafkaJS  
-**Function**: Sends emails with retry logic
-
-### 5. SMS Service
-**Purpose**: SMS delivery  
-**Tech**: Twilio SDK, KafkaJS  
-**Function**: Sends SMS with retry logic
-
-### 6. Notification API (Port 3002)
-**Purpose**: Notification history  
-**Tech**: Express, Prisma  
-**Function**: REST API for notification queries
-
-### 7. Social API (Port 3003)
-**Purpose**: Social platform features  
-**Tech**: Express, Prisma, JWT, bcrypt  
-**Functions**:
-- User authentication
-- Post management
-- Comment system
-- Follow system
-- Sends events to Kafka
-
-## 🧪 Testing
-
-### Manual Testing
-
-1. **Register User**:
-```bash
-curl -X POST http://localhost:3003/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@test.com","username":"testuser","password":"test123"}'
-```
-
-2. **Create Post**:
-```bash
-curl -X POST http://localhost:3003/api/posts \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"caption":"Hello World!","imageUrl":"https://picsum.photos/800/600"}'
-```
-
-3. **Trigger Notification**:
-```bash
-curl -X POST http://localhost:3001/api/events \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type":"LIKE",
-    "priority":"LOW",
-    "actorId":"user1",
-    "actorName":"John",
-    "targetId":"user2",
-    "message":"liked your post"
-  }'
-```
-
-4. **Check Notifications**:
-```bash
-curl http://localhost:3002/api/notifications/user2
-```
-
-## 🔐 Security
-
-- **JWT Authentication**: Secure token-based auth with 7-day expiry
-- **Password Hashing**: bcrypt with 10 salt rounds
-- **CORS**: Configured for localhost:5173
-- **Input Validation**: All endpoints validate input
-- **SQL Injection Prevention**: Prisma ORM protects against SQL injection
-- **Error Handling**: No sensitive info in error responses
-
-## 🎨 UI Features
-
-- **Responsive Design**: Works on desktop and mobile
-- **Real-time Updates**: Notifications appear instantly
-- **Instagram-style UI**: Familiar interface
-- **Loading States**: Smooth loading indicators
-- **Error Handling**: User-friendly error messages
-- **Gradient Styling**: Purple/pink theme
-
-## 📈 Performance
-
-- **Aggregation**: Reduces notification spam by 80%
-- **Priority Routing**: Critical notifications delivered in <100ms
-- **Caching**: Redis caching for aggregation
-- **Connection Pooling**: Efficient database connections
-- **WebSocket**: Persistent connections for real-time delivery
 
 ## 📝 License
 
