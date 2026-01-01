@@ -233,10 +233,11 @@ export const NotificationTester: React.FC = () => {
         <div className="mt-6 p-4 bg-blue-50 rounded-lg text-sm text-blue-700">
           <p className="font-semibold mb-2">📊 Expected Behavior:</p>
           <ul className="list-disc list-inside space-y-1">
-            <li>1-5 likes: Toast + Notification Bell (after 2 min aggregation)</li>
-            <li>6+ likes: Notification Bell only (no toast, after 2 min)</li>
+            <li>1-2 likes: Instant delivery (no aggregation)</li>
+            <li>3-49 likes: Aggregated after 60 seconds</li>
+            <li>50+ likes: Instant delivery (batch full)</li>
             <li>Comments: Always Toast + Notification (immediate)</li>
-            <li>Followed users: HIGH priority (faster delivery)</li>
+            <li>All social interactions: HIGH priority (faster delivery)</li>
           </ul>
         </div>
       </div>
