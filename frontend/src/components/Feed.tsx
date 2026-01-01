@@ -3,6 +3,7 @@ import { Heart, MessageCircle, Share2, Bookmark } from 'lucide-react';
 import axios from 'axios';
 import { SOCIAL_API_URL } from '../config/api';
 import { useAuth } from '../hooks/useAuth';
+import { PostTester } from './PostTester';
 
 interface Post {
   id: string;
@@ -268,6 +269,12 @@ export const Feed: React.FC = () => {
                 </button>
               )}
             </div>
+
+            {/* Post Tester - Auto-filled with post ID and user info */}
+            <PostTester 
+              postId={post.id}
+              username={post.user.username}
+            />
           </div>
           );
         })}
