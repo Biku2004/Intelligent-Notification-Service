@@ -239,9 +239,9 @@ async function startLowPriorityConsumer() {
 function startAggregationFlushJob() {
   setInterval(async () => {
     await flushExpiredWindows();
-  }, 60000); // 1 minute
+  }, 30000); // 30 seconds
 
-  console.log('⏰ Aggregation flush job started (60s interval)');
+  console.log('⏰ Aggregation flush job started (30s interval)');
 }
 
 /**

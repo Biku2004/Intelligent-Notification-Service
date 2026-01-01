@@ -3,7 +3,7 @@
 import redis from '../config/redis';
 import { NotificationEvent, NotificationType } from '../../../shared/types';
 
-const AGGREGATION_WINDOW_SECONDS = 120; // 2 minutes
+const AGGREGATION_WINDOW_SECONDS = 60; // 1 minute
 const MAX_BATCH_SIZE = 50;
 
 interface AggregationKey {
@@ -107,13 +107,28 @@ export async function addToAggregationWindow(
     // Check batch size
     const currentCount = await redis.zcard(redisKey);
 
+    // Send immediately for first 1-2 likes (instant feedback)
+    if (currentCount <= 2) {
+      console.log(`⚡ First ${currentCount} event(s) - sending immediately for instant feedback`);
+      return { shouldSendNow: true };
+    }
+
     // Flush if max batch size reached
     if (currentCount >= MAX_BATCH_SIZE) {
+      console.log(`📦 Batch size limit reached (${MAX_BATCH_SIZE}) - flushing immediately`);
       const aggregated = await flushAggregationWindow(redisKey, metaKey);
       return { shouldSendNow: true, aggregatedData: aggregated };
     }
 
-    // Otherwise, wait for window to close
+    // Calculate wait time until window expires
+    const windowStartTime = windowId * AGGREGATION_WINDOW_SECONDS * 1000;
+    const windowEndTime = windowStartTime + (AGGREGATION_WINDOW_SECONDS * 1000);
+    const waitTimeMs = windowEndTime - Date.now();
+    const waitTimeSec = Math.ceil(waitTimeMs / 1000);
+    
+    console.log(`⏳ Event queued in window ${windowId} | Count: ${currentCount}/${MAX_BATCH_SIZE} | Wait time: ${waitTimeSec}s`);
+    
+    // Otherwise, wait for window to close (3+ events)
     return { shouldSendNow: false };
   } catch (error) {
     console.error('❌ Aggregation error:', error);
