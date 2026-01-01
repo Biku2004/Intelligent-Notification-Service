@@ -4,8 +4,9 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Calendar, Settings as SettingsIcon, Bell, BellOff } from 'lucide-react';
+import { Calendar, Settings as SettingsIcon } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { BellToggle } from './BellToggle';
 import type { User, Post } from '../types';
 
 const API_BASE = 'http://localhost:3003';
@@ -29,8 +30,11 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
     try {
       setLoading(true);
       
-      // Fetch user profile
-      const userResponse = await axios.get(`${API_BASE}/api/users/${userId}`);
+      const token = localStorage.getItem('authToken');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      
+      // Fetch user profile with auth to get bellEnabled status
+      const userResponse = await axios.get(`${API_BASE}/api/users/${userId}`, { headers });
       if (userResponse.data.success) {
         setUser(userResponse.data.user);
       }
@@ -88,12 +92,22 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
     if (!currentUser) return;
     
     try {
-      const response = await axios.post(`${API_BASE}/api/follows/${userId}`);
+      const token = localStorage.getItem('authToken');
+      const response = await axios.post(
+        `${API_BASE}/api/follows/${userId}`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
       if (response.data.success) {
         setUser(prev => prev ? {
           ...prev,
           isFollowing: response.data.following,
-          followersCount: (prev.followersCount || 0) + (response.data.following ? 1 : -1)
+          followersCount: (prev.followersCount || 0) + (response.data.following ? 1 : -1),
+          bellEnabled: response.data.following ? false : prev.bellEnabled, // Reset bell when unfollowing
         } : null);
       }
     } catch (error) {
@@ -101,17 +115,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
     }
   };
 
-  const handleBellToggle = async () => {
-    if (!currentUser || !user?.isFollowing) return;
-    
-    try {
-      const response = await axios.post(`${API_BASE}/api/follows/${userId}/bell`);
-      if (response.data.success) {
-        setUser(prev => prev ? { ...prev, bellEnabled: response.data.bellEnabled } : null);
-      }
-    } catch (error) {
-      console.error('Failed to toggle bell:', error);
-    }
+  const handleBellToggle = (newState: boolean) => {
+    setUser(prev => prev ? { ...prev, bellEnabled: newState } : null);
   };
 
   if (loading) {
@@ -169,19 +174,14 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
                   {user.isFollowing ? 'Following' : 'Follow'}
                 </button>
                 
-                {user.isFollowing && (
-                  <button
-                    onClick={handleBellToggle}
-                    className={`p-2 rounded-lg transition ${
-                      user.bellEnabled
-                        ? 'bg-purple-100 text-purple-600 hover:bg-purple-200'
-                        : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                    }`}
-                    title={user.bellEnabled ? 'Turn off notifications' : 'Turn on notifications'}
-                  >
-                    {user.bellEnabled ? <Bell size={20} fill="currentColor" /> : <BellOff size={20} />}
-                  </button>
-                )}
+                <BellToggle
+                  userId={userId}
+                  isFollowing={user.isFollowing}
+                  bellEnabled={user.bellEnabled || false}
+                  onToggle={handleBellToggle}
+                  size="medium"
+                  variant="icon"
+                />
               </>
             )}
           </div>

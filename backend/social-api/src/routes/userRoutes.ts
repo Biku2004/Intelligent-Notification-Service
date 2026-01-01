@@ -46,6 +46,7 @@ router.get('/:userId', optionalAuthMiddleware, async (req: AuthRequest, res: Res
 
     // Check if current user is following this user
     let isFollowing = false;
+    let bellEnabled = false;
     if (currentUserId) {
       const follow = await prisma.follow.findUnique({
         where: {
@@ -56,6 +57,17 @@ router.get('/:userId', optionalAuthMiddleware, async (req: AuthRequest, res: Res
         }
       });
       isFollowing = !!follow;
+
+      // Check bell subscription status
+      const bellSub = await prisma.bellSubscription.findUnique({
+        where: {
+          subscriberId_targetUserId: {
+            subscriberId: currentUserId,
+            targetUserId: userId
+          }
+        }
+      });
+      bellEnabled = !!bellSub;
     }
 
     res.json({
@@ -66,6 +78,7 @@ router.get('/:userId', optionalAuthMiddleware, async (req: AuthRequest, res: Res
         followersCount: user._count.followers,
         followingCount: user._count.following,
         isFollowing,
+        bellEnabled,
       }
     });
   } catch (error: any) {
