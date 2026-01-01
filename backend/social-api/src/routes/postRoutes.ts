@@ -306,10 +306,21 @@ router.post('/:postId/like', authMiddleware, async (req: AuthRequest, res: Respo
           select: { username: true, name: true, avatarUrl: true }
         });
 
+        // Check if post owner follows the liker (for priority)
+        const isFollowed = await prisma.follow.findUnique({
+          where: {
+            followerId_followingId: {
+              followerId: post.userId,
+              followingId: userId
+            }
+          }
+        });
+
+        // HIGH priority for all social interactions
         await sendNotificationEvent({
           id: uuidv4(),
           type: 'LIKE',
-          priority: 'LOW',
+          priority: 'HIGH',
           actorId: userId,
           actorName: liker?.name || liker?.username || 'Someone',
           actorAvatar: liker?.avatarUrl,
@@ -322,6 +333,7 @@ router.post('/:postId/like', authMiddleware, async (req: AuthRequest, res: Respo
           timestamp: new Date().toISOString(),
           metadata: {
             postUrl: `/posts/${postId}`,
+            isFromFollowedUser: !!isFollowed,
           }
         });
       }

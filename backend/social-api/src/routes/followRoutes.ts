@@ -83,10 +83,21 @@ router.post('/:userId', authMiddleware, async (req: AuthRequest, res: Response) 
         select: { username: true, name: true, avatarUrl: true }
       });
 
+      // Check if it's mutual follow
+      const isMutualFollow = await prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: followingId,
+            followingId: followerId
+          }
+        }
+      });
+
+      // HIGH priority for all social interactions
       await sendNotificationEvent({
         id: uuidv4(),
         type: 'FOLLOW',
-        priority: 'LOW',
+        priority: 'HIGH',
         actorId: followerId,
         actorName: follower?.name || follower?.username || 'Someone',
         actorAvatar: follower?.avatarUrl,
@@ -98,6 +109,7 @@ router.post('/:userId', authMiddleware, async (req: AuthRequest, res: Response) 
         timestamp: new Date().toISOString(),
         metadata: {
           profileUrl: `/users/${followerId}`,
+          isMutualFollow: !!isMutualFollow,
         }
       });
     }
