@@ -1,0 +1,31 @@
+{
+  "name": "notification-system",
+  "version": "1.0.0",
+  "description": "Intelligent Notification System - Complete Setup",
+  "private": true,
+  "scripts": {
+    "setup": "npm run setup:prisma && npm run install:all",
+    "setup:prisma": "node scripts/setup-prisma.js",
+    "install:all": "npm run install:backend && npm run install:frontend",
+    "install:backend": "cd backend/ingestion-service && npm install && cd ../notification-api && npm install && cd ../processing-service && npm install && cd ../social-api && npm install && cd ../email-service && npm install && cd ../sms-service && npm install && cd ../socket-service && npm install",
+    "install:frontend": "cd frontend && npm install",
+    "dev:all": "node scripts/start-all.js",
+    "dev:backend": "node scripts/start-all.js",
+    "build:backend": "cd backend/ingestion-service && npm run build && cd ../notification-api && npm run build && cd ../processing-service && npm run build && cd ../social-api && npm run build && cd ../email-service && npm run build && cd ../sms-service && npm run build && cd ../socket-service && npm run build",
+    "prisma:migrate": "node scripts/setup-prisma.js migrate",
+    "prisma:generate": "node scripts/setup-prisma.js generate"
+  },
+  "keywords": [
+    "notification",
+    "kafka",
+    "microservices",
+    "prisma",
+    "websocket"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "chalk": "^4.1.2"
+  }
+}

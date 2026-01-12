@@ -9,8 +9,11 @@ import { logNotification } from './services/dynamoService';
 import { checkUserPreferences } from './services/preferenceService';
 import { NotificationEvent, NotificationPriority, KAFKA_TOPICS } from '../../shared/types';
 import { ensureTopicsExist } from './config/initTopics';
+import { PrismaClient } from '@prisma/client';
 
 dotenv.config();
+
+const prisma = new PrismaClient();
 
 /**
  * Determine delivery channels based on notification priority
@@ -66,7 +69,11 @@ const producer = kafka.producer();
  * Process notification event with aggregation and filtering
  */
 async function processNotificationEvent(event: NotificationEvent): Promise<void> {
-  console.log(`📥 [${event.priority}] Processing: ${event.type} for ${event.targetId}`);
+  console.log(`\n📥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  console.log(`📥 INCOMING: ${event.type} | Priority: ${event.priority}`);
+  console.log(`📥 Target User: ${event.targetId}`);
+  console.log(`📥 Actor: ${event.actorName || event.actorId}`);
+  console.log(`📥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
   try {
     // 1. Preference Check (DND, muted categories, etc.)
@@ -98,8 +105,17 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
         agg.count
       );
 
+      // Determine priority based on aggregation count
+      // 3-4 likes/interactions = CRITICAL (sweet spot for engagement)
+      let priority = agg.firstEvent.priority;
+      if ((agg.count === 3 || agg.count === 4) && event.type === 'LIKE') {
+        priority = 'CRITICAL';
+        console.log(`🔥 CRITICAL priority: ${agg.count} likes on post`);
+      }
+
       finalEvent = {
         ...agg.firstEvent,
+        priority,
         message: aggregatedMessage,
         title: `${agg.count} new ${event.type.toLowerCase()}${agg.count > 1 ? 's' : ''}`,
         actorId: agg.actors[0],
@@ -114,7 +130,7 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
         },
       };
 
-      console.log(`📊 Aggregated notification: ${agg.count} events`);
+      console.log(`📊 Aggregated notification: ${agg.count} events | Priority: ${priority}`);
     }
 
     // 4. Determine delivery channels based on priority
@@ -129,7 +145,7 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
       },
     };
 
-    console.log(`📡 [${finalEvent.priority}] Channels: [${channels.join(', ')}]`);
+    console.log(`📡 [${finalEvent.priority}] Delivery Channels: [${channels.join(', ')}]`);
 
     // 5. Send to delivery topic
     await producer.send({
@@ -146,7 +162,41 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
 
     // 6. Log to DynamoDB
     await logNotification(finalEvent, 'SENT');
-    console.log(`✅ [${event.priority}] Sent: ${event.type} for ${event.targetId}`);
+    
+    // 7. Save to PostgreSQL for persistence
+    try {
+      await prisma.notificationHistory.create({
+        data: {
+          userId: finalEvent.targetId,
+          type: finalEvent.type,
+          priority: finalEvent.priority,
+          actorId: finalEvent.actorId,
+          actorName: finalEvent.actorName || 'Someone',
+          actorAvatar: finalEvent.actorAvatar,
+          isAggregated: !!finalEvent.metadata?.isAggregated,
+          aggregatedCount: finalEvent.metadata?.aggregatedCount || 1,
+          aggregatedIds: finalEvent.metadata?.aggregatedActors || [],
+          title: finalEvent.title || 'New notification',
+          message: finalEvent.message || '',
+          imageUrl: finalEvent.imageUrl,
+          targetType: finalEvent.targetType,
+          targetId: finalEvent.targetEntityId,
+          isRead: false,
+          deliveryStatus: 'SENT',
+          channels: finalEvent.metadata?.channels || [],
+        }
+      });
+      console.log(`💾 Saved to PostgreSQL: ${finalEvent.id}`);
+    } catch (dbError) {
+      console.error(`❌ PostgreSQL save error:`, dbError);
+      // Don't fail the entire operation if DB save fails
+    }
+    
+    console.log(`\n✅ ════════════════════════════════════════════════`);
+    console.log(`✅ DELIVERED: ${event.type} | Priority: ${finalEvent.priority}`);
+    console.log(`✅ Target: ${event.targetId}`);
+    console.log(`✅ Message: ${finalEvent.message?.substring(0, 50)}...`);
+    console.log(`✅ ════════════════════════════════════════════════\n`);
 
   } catch (error) {
     console.error(`❌ Error processing event:`, error);
@@ -287,6 +337,7 @@ process.on('SIGTERM', async () => {
   await highPriorityConsumer.disconnect();
   await lowPriorityConsumer.disconnect();
   await producer.disconnect();
+  await prisma.$disconnect();
   process.exit(0);
 });
 

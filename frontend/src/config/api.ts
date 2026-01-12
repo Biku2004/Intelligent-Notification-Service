@@ -13,7 +13,7 @@ export const NOTIFICATION_API_URL = import.meta.env.VITE_NOTIFICATION_API_URL ||
 export const INGESTION_API_URL = import.meta.env.VITE_INGESTION_API_URL || 'http://localhost:3001';
 
 // Socket API - Real-time WebSocket notifications
-export const SOCKET_API_URL = import.meta.env.VITE_SOCKET_API_URL || 'http://localhost:3004';
+export const SOCKET_API_URL = import.meta.env.VITE_SOCKET_API_URL || 'http://localhost:4000';
 
 export const API_CONFIG = {
   social: SOCIAL_API_URL,

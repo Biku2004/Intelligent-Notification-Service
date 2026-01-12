@@ -15,14 +15,28 @@ model NotificationHistory {
   userId          String
   type            String
   priority        String
+  actorId         String?
+  actorName       String?
+  actorAvatar     String?
   isAggregated    Boolean  @default(false)
   aggregatedCount Int      @default(1)
+  aggregatedIds   String[]
   title           String
   message         String
+  imageUrl        String?
+  targetType      String?
+  targetId        String?
   isRead          Boolean  @default(false)
+  readAt          DateTime?
+  deliveryStatus  String   @default("PENDING")
   channels        String[]
   metadata        Json?
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([userId, createdAt])
+  @@index([userId, isRead])
+  @@index([priority])
 }
 
 // ========================================

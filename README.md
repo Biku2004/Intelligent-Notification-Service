@@ -160,7 +160,7 @@ An enterprise-grade notification system that combines real-time delivery, intell
 ### DevOps
 | Tool | Purpose |
 |------|---------|
-| **Docker** | Kafka & Zookeeper |
+| **Docker** | Containerization (Kafka KRaft mode) |
 | **Nodemon** | Auto-reload in dev |
 | **ts-node** | TypeScript execution |
 
@@ -273,7 +273,7 @@ notification-system/
 │   └── tailwind.config.js
 │
 ├── infra/                          # Infrastructure configs
-├── docker-compose.yml              # Kafka & Zookeeper
+├── docker-compose.yml              # Kafka (KRaft mode), PostgreSQL, Redis, DynamoDB
 ├── BACKEND_CONNECTIONS.md          # Service connections
 └── README.md                       # This file
 ```
@@ -298,7 +298,7 @@ git clone https://github.com/Biku2004/Intelligent-Notification-Service.git
 cd notification-system
 ```
 
-#### 2. Start Kafka & Zookeeper
+#### 2. Start Infrastructure (Kafka KRaft, PostgreSQL, Redis, DynamoDB)
 
 ```bash
 docker-compose up -d

@@ -1,9 +1,9 @@
 import React from 'react';
-import { Home, Search, PlusSquare, User, Settings, FlaskConical } from 'lucide-react';
+import { Home, Search, PlusSquare, User, Settings, FlaskConical, LayoutDashboard } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 
 interface NavbarProps {
-  onNavigate: (page: 'feed' | 'preferences' | 'profile' | 'tester') => void;
+  onNavigate: (page: 'feed' | 'preferences' | 'profile' | 'tester' | 'dashboard') => void;
   currentPage: string;
   onCreatePost: () => void;
   onProfileClick: () => void;
@@ -69,6 +69,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onCreat
               title="Test Notifications"
             >
               <FlaskConical size={24} />
+            </button>
+
+            <button
+              onClick={() => onNavigate('dashboard')}
+              className={`p-2 rounded-lg transition-colors ${
+                currentPage === 'dashboard' ? 'bg-gray-800 text-cyan-400' : 'hover:bg-gray-800 text-cyan-500'
+              }`}
+              aria-label="System Dashboard"
+              title="System Dashboard"
+            >
+              <LayoutDashboard size={24} />
             </button>
 
             <button

@@ -60,8 +60,9 @@ export const PostTester: React.FC<PostTesterProps> = ({ postId, username }) => {
 
       for (let i = 0; i < commentCount; i++) {
         await axios.post(
-          `${SOCIAL_API_URL}/api/posts/${postId}/comments`,
+          `${SOCIAL_API_URL}/api/comments`,
           {
+            postId: postId,
             content: `Test comment ${i + 1} from notification tester`
           },
           {
@@ -169,7 +170,7 @@ export const PostTester: React.FC<PostTesterProps> = ({ postId, username }) => {
 
           {/* Tip */}
           <div className="text-xs text-gray-600 bg-gray-100 px-3 py-2 rounded">
-            💡 <strong>Tip:</strong> 1-2 likes = Instant, 3+ = Aggregated after 30-60s
+            💡 <strong>Tip:</strong> 1-2 = Instant, 3-4 = CRITICAL, 10 = Milestone, 5-9/11-49 = Aggregated
           </div>
         </div>
       )}

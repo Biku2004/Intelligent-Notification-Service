@@ -22,17 +22,49 @@ const API_BASE = 'http://localhost:3003';
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Initialize state from localStorage
   const [user, setUser] = useState<User | null>(() => {
-    const storedUser = localStorage.getItem('authUser');
-    return storedUser ? JSON.parse(storedUser) : null;
+    try {
+      const storedUser = localStorage.getItem('authUser');
+      if (!storedUser) return null;
+      
+      const parsedUser = JSON.parse(storedUser);
+      // Validate that the user object has required properties
+      if (parsedUser && parsedUser.id && parsedUser.email) {
+        return parsedUser;
+      }
+      // Clear invalid user data
+      localStorage.removeItem('authUser');
+      localStorage.removeItem('authToken');
+      return null;
+    } catch (error) {
+      console.error('Error parsing stored user:', error);
+      localStorage.removeItem('authUser');
+      localStorage.removeItem('authToken');
+      return null;
+    }
   });
   
   const [token, setToken] = useState<string | null>(() => {
     const storedToken = localStorage.getItem('authToken');
-    if (storedToken) {
-      // Set default axios header on initial load
-      axios.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+    const storedUser = localStorage.getItem('authUser');
+    
+    // Only set token if both token and user exist
+    if (storedToken && storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        if (parsedUser && parsedUser.id && parsedUser.email) {
+          // Set default axios header on initial load
+          axios.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+          return storedToken;
+        }
+      } catch (error) {
+        console.error('Error validating stored auth:', error);
+      }
     }
-    return storedToken;
+    
+    // Clear invalid data
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('authUser');
+    return null;
   });
 
   const login = async (email: string, password: string) => {

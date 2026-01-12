@@ -5,9 +5,9 @@
   "main": "dist/app.js",
   "scripts": {
     "start": "node dist/app.js",
-    "dev": "nodemon",
+    "dev": "npx prisma generate && nodemon",
     "build": "tsc",
-    "prisma:generate": "prisma generate --schema=../processing-service/prisma/schema.prisma"
+    "prisma:generate": "prisma generate"
   },
   "keywords": [],
   "author": "",

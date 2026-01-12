@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Heart, MessageCircle, Share2, Bookmark } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Bookmark, UserPlus, UserCheck } from 'lucide-react';
 import axios from 'axios';
 import { SOCIAL_API_URL } from '../config/api';
 import { useAuth } from '../hooks/useAuth';
 import { PostTester } from './PostTester';
+import { UserProfile } from './UserProfile';
 
 interface Post {
   id: string;
@@ -21,6 +22,8 @@ interface Post {
     likes: number;
     comments: number;
   };
+  likesCount: number;
+  isLiked: boolean;
   likes?: Array<{ userId: string }>;
 }
 
@@ -30,6 +33,8 @@ export const Feed: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+  const [followedUsers, setFollowedUsers] = useState<Set<string>>(new Set());
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   const fetchPosts = async () => {
     try {
@@ -40,16 +45,41 @@ export const Feed: React.FC = () => {
           Authorization: `Bearer ${token}`
         }
       });
-      setPosts(response.data.posts || []);
       
-      // Track which posts are liked by current user
+      const fetchedPosts = response.data.posts || [];
+      setPosts(fetchedPosts);
+      
+      // Track which posts are liked by current user using isLiked from backend
       const liked = new Set<string>();
-      response.data.posts.forEach((post: Post) => {
-        if (post.likes?.some(like => like.userId === user?.id)) {
+      fetchedPosts.forEach((post: Post) => {
+        if (post.isLiked) {
           liked.add(post.id);
         }
       });
       setLikedPosts(liked);
+      
+      // Fetch follow status for all post authors
+      if (token && user) {
+        const uniqueUserIds = Array.from(new Set(fetchedPosts.map((p: Post) => p.userId)));
+        const followStatuses = await Promise.all(
+          uniqueUserIds.map(async (userId) => {
+            try {
+              const followRes = await axios.get(`${SOCIAL_API_URL}/api/users/${userId}`, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              return { userId, isFollowing: followRes.data.user?.isFollowing || false };
+            } catch {
+              return { userId, isFollowing: false };
+            }
+          })
+        );
+        
+        const followed = new Set<string>();
+        followStatuses.forEach(({ userId, isFollowing }) => {
+          if (isFollowing) followed.add(userId);
+        });
+        setFollowedUsers(followed);
+      }
     } catch (err: any) {
       console.error('Failed to fetch posts:', err);
       setError(err.response?.data?.error || 'Failed to load posts');
@@ -71,7 +101,7 @@ export const Feed: React.FC = () => {
         return;
       }
 
-      await axios.post(
+      const response = await axios.post(
         `${SOCIAL_API_URL}/api/posts/${postId}/like`,
         {},
         {
@@ -81,27 +111,31 @@ export const Feed: React.FC = () => {
         }
       );
 
-      // Toggle like status
+      // Use backend response to update state
+      const { liked, likesCount } = response.data;
+      
+      // Update liked posts state based on backend response
       setLikedPosts(prev => {
         const newSet = new Set(prev);
-        if (newSet.has(postId)) {
-          newSet.delete(postId);
-        } else {
+        if (liked) {
           newSet.add(postId);
+        } else {
+          newSet.delete(postId);
         }
         return newSet;
       });
 
-      // Update like count
+      // Update like count from backend response
       setPosts(prev => prev.map(post => {
         if (post.id === postId) {
-          const isLiked = likedPosts.has(postId);
           return {
             ...post,
+            likesCount: likesCount,
             _count: {
               ...post._count,
-              likes: post._count.likes + (isLiked ? -1 : 1)
-            }
+              likes: likesCount
+            },
+            isLiked: liked
           };
         }
         return post;
@@ -118,6 +152,45 @@ export const Feed: React.FC = () => {
         alert(error.response?.data?.error || 'Failed to like post');
       }
     }
+  };
+
+  const handleFollow = async (userId: string) => {
+    try {
+      const token = localStorage.getItem('authToken');
+      
+      if (!token) {
+        alert('Please login to follow users');
+        return;
+      }
+
+      await axios.post(
+        `${SOCIAL_API_URL}/api/follows/${userId}`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      // Toggle follow status
+      setFollowedUsers(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(userId)) {
+          newSet.delete(userId);
+        } else {
+          newSet.add(userId);
+        }
+        return newSet;
+      });
+    } catch (err: any) {
+      console.error('Failed to follow user:', err);
+      alert(err.response?.data?.error || 'Failed to follow user');
+    }
+  };
+
+  const handleUserClick = (userId: string) => {
+    setSelectedUserId(userId);
   };
 
   const handleComment = (postId: string) => {
@@ -173,6 +246,21 @@ export const Feed: React.FC = () => {
     );
   }
 
+  // Show user profile if selected
+  if (selectedUserId) {
+    return (
+      <div className="max-w-4xl mx-auto py-6">
+        <button
+          onClick={() => setSelectedUserId(null)}
+          className="mb-4 px-4 py-2 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-lg font-medium transition"
+        >
+          ← Back to Feed
+        </button>
+        <UserProfile userId={selectedUserId} />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl mx-auto py-6">
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Your Feed</h2>
@@ -180,22 +268,58 @@ export const Feed: React.FC = () => {
       <div className="space-y-6">
         {posts.map((post) => {
           const isLiked = likedPosts.has(post.id);
+          const isFollowing = followedUsers.has(post.userId);
+          const isOwnPost = post.userId === user?.id;
           
           return (
             <div key={post.id} className="bg-white rounded-lg shadow-md overflow-hidden">
               {/* Post Header */}
               <div className="flex items-center justify-between p-4">
                 <div className="flex items-center gap-3">
-                  <img
-                    src={post.user.avatarUrl || `https://ui-avatars.com/api/?name=${post.user.username}&background=random`}
-                    alt={post.user.username}
-                    className="w-10 h-10 rounded-full object-cover"
-                  />
+                  <button 
+                    onClick={() => handleUserClick(post.userId)}
+                    className="hover:opacity-80 transition"
+                  >
+                    <img
+                      src={post.user.avatarUrl || `https://ui-avatars.com/api/?name=${post.user.username}&background=random`}
+                      alt={post.user.username}
+                      className="w-10 h-10 rounded-full object-cover"
+                    />
+                  </button>
                   <div>
-                    <p className="font-semibold text-gray-900">{post.user.name || post.user.username}</p>
+                    <button 
+                      onClick={() => handleUserClick(post.userId)}
+                      className="font-semibold text-gray-900 hover:text-purple-600 transition"
+                    >
+                      {post.user.name || post.user.username}
+                    </button>
                     <p className="text-xs text-gray-500">{formatTime(post.createdAt)}</p>
                   </div>
                 </div>
+                
+                {/* Follow Button */}
+                {!isOwnPost && (
+                  <button
+                    onClick={() => handleFollow(post.userId)}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-medium text-sm transition ${
+                      isFollowing
+                        ? 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                        : 'bg-purple-600 hover:bg-purple-700 text-white'
+                    }`}
+                  >
+                    {isFollowing ? (
+                      <>
+                        <UserCheck size={16} />
+                        Following
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus size={16} />
+                        Follow
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
 
             {/* Post Image */}
@@ -245,7 +369,7 @@ export const Feed: React.FC = () => {
               {/* Post Stats */}
               <div className="mb-2">
                 <p className="font-semibold text-gray-900">
-                  {post._count.likes.toLocaleString()} {post._count.likes === 1 ? 'like' : 'likes'}
+                  {(post.likesCount || post._count?.likes || 0).toLocaleString()} {(post.likesCount || post._count?.likes || 0) === 1 ? 'like' : 'likes'}
                 </p>
               </div>
 

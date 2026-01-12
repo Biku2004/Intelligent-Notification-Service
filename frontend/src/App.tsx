@@ -13,8 +13,9 @@ import { Register } from './components/Register';
 import { ToastContainer } from './components/ToastNotification';
 import type { Toast } from './components/ToastNotification';
 import { NotificationTester } from './components/NotificationTester';
+import { SystemDashboard } from './components/SystemDashboard';
 
-type Page = 'feed' | 'preferences' | 'profile' | 'tester';
+type Page = 'feed' | 'preferences' | 'profile' | 'tester' | 'dashboard';
 
 function AppContent() {
   const { user } = useAuth();
@@ -102,6 +103,8 @@ function AppContent() {
           <NotificationPreferences />
         ) : currentPage === 'tester' ? (
           <NotificationTester />
+        ) : currentPage === 'dashboard' ? (
+          <SystemDashboard />
         ) : (
           <UserProfile userId={user.id} />
         )}

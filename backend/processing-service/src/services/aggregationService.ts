@@ -109,13 +109,44 @@ export async function addToAggregationWindow(
 
     // Send immediately for first 1-2 likes (instant feedback)
     if (currentCount <= 2) {
-      console.log(`⚡ First ${currentCount} event(s) - sending immediately for instant feedback`);
+      console.log(`\n⚡ ════════════════════════════════════════════════`);
+      console.log(`⚡ INSTANT DELIVERY: ${event.type} #${currentCount}`);
+      console.log(`⚡ Reason: First ${currentCount} event(s) - immediate feedback`);
+      console.log(`⚡ Target User: ${event.targetId}`);
+      console.log(`⚡ Actor: ${event.actorName || event.actorId}`);
+      console.log(`⚡ ════════════════════════════════════════════════\n`);
       return { shouldSendNow: true };
+    }
+
+    // Send aggregated at 3-4 (CRITICAL priority threshold)
+    if (currentCount === 3 || currentCount === 4) {
+      console.log(`\n🔥 ════════════════════════════════════════════════`);
+      console.log(`🔥 CRITICAL THRESHOLD: ${currentCount} ${event.type}s`);
+      console.log(`🔥 Status: Flushing with CRITICAL priority`);
+      console.log(`🔥 Target User: ${event.targetId}`);
+      console.log(`🔥 ════════════════════════════════════════════════\n`);
+      const aggregated = await flushAggregationWindow(redisKey, metaKey);
+      return { shouldSendNow: true, aggregatedData: aggregated };
+    }
+
+    // Send aggregated at 10 (double digits milestone)
+    if (currentCount === 10) {
+      console.log(`\n🎉 ════════════════════════════════════════════════`);
+      console.log(`🎉 MILESTONE: 10 ${event.type}s reached!`);
+      console.log(`🎉 Status: Flushing aggregated notification`);
+      console.log(`🎉 Target User: ${event.targetId}`);
+      console.log(`🎉 ════════════════════════════════════════════════\n`);
+      const aggregated = await flushAggregationWindow(redisKey, metaKey);
+      return { shouldSendNow: true, aggregatedData: aggregated };
     }
 
     // Flush if max batch size reached
     if (currentCount >= MAX_BATCH_SIZE) {
-      console.log(`📦 Batch size limit reached (${MAX_BATCH_SIZE}) - flushing immediately`);
+      console.log(`\n📦 ════════════════════════════════════════════════`);
+      console.log(`📦 BATCH LIMIT: ${MAX_BATCH_SIZE} events reached`);
+      console.log(`📦 Status: Flushing immediately`);
+      console.log(`📦 Target User: ${event.targetId}`);
+      console.log(`📦 ════════════════════════════════════════════════\n`);
       const aggregated = await flushAggregationWindow(redisKey, metaKey);
       return { shouldSendNow: true, aggregatedData: aggregated };
     }
@@ -126,9 +157,17 @@ export async function addToAggregationWindow(
     const waitTimeMs = windowEndTime - Date.now();
     const waitTimeSec = Math.ceil(waitTimeMs / 1000);
     
-    console.log(`⏳ Event queued in window ${windowId} | Count: ${currentCount}/${MAX_BATCH_SIZE} | Wait time: ${waitTimeSec}s`);
+    console.log(`\n⏳ ════════════════════════════════════════════════`);
+    console.log(`⏳ QUEUED IN AGGREGATION WINDOW`);
+    console.log(`⏳ Type: ${event.type}`);
+    console.log(`⏳ Window ID: ${windowId}`);
+    console.log(`⏳ Current Count: ${currentCount}/${MAX_BATCH_SIZE}`);
+    console.log(`⏳ Wait Time: ${waitTimeSec}s until window flush`);
+    console.log(`⏳ Target User: ${event.targetId}`);
+    console.log(`⏳ Next threshold: ${currentCount < 10 ? '10' : '50'} events`);
+    console.log(`⏳ ════════════════════════════════════════════════\n`);
     
-    // Otherwise, wait for window to close (3+ events)
+    // Otherwise, wait for window to close (5-9, 11-49 events)
     return { shouldSendNow: false };
   } catch (error) {
     console.error('❌ Aggregation error:', error);

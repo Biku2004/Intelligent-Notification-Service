@@ -80,8 +80,9 @@ export const NotificationTester: React.FC = () => {
       // Simulate comments
       for (let i = 0; i < config.commentCount; i++) {
         await axios.post(
-          `${SOCIAL_API_URL}/api/posts/${config.postId}/comments`,
+          `${SOCIAL_API_URL}/api/comments`,
           {
+            postId: config.postId,
             content: `Test comment ${i + 1} from tester mode`
           },
           {
@@ -234,10 +235,13 @@ export const NotificationTester: React.FC = () => {
           <p className="font-semibold mb-2">📊 Expected Behavior:</p>
           <ul className="list-disc list-inside space-y-1">
             <li>1-2 likes: Instant delivery (no aggregation)</li>
-            <li>3-49 likes: Aggregated after 60 seconds</li>
+            <li>3-4 likes: Instant CRITICAL priority (aggregated)</li>
+            <li>5-9 likes: Aggregated after 60 seconds</li>
+            <li>10 likes: Instant milestone notification</li>
+            <li>11-49 likes: Aggregated after 60 seconds</li>
             <li>50+ likes: Instant delivery (batch full)</li>
             <li>Comments: Always Toast + Notification (immediate)</li>
-            <li>All social interactions: HIGH priority (faster delivery)</li>
+            <li>All social interactions: HIGH priority (CRITICAL at 3-4)</li>
           </ul>
         </div>
       </div>
