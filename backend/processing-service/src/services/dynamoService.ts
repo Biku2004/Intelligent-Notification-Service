@@ -5,10 +5,24 @@ const client = new DynamoDBClient({
   region: 'us-east-1',
   endpoint: 'http://localhost:8000', // Docker DynamoDB
   credentials: { accessKeyId: 'dummy', secretAccessKey: 'dummy' },
+  requestHandler: {
+    requestTimeout: 3000, // 3 second timeout
+  } as any,
 });
 
-export const logNotification = async (event: any, status: 'SENT' | 'SUPPRESSED' | 'FILTERED_PREFS' | 'FAILED') => {  const command = new PutItemCommand({
-    TableName: 'NotificationLogs', // We need to create this table later!
+// Flag to track if DynamoDB is available
+let dynamoAvailable = true;
+let lastError: Date | null = null;
+
+export const logNotification = async (event: any, status: 'SENT' | 'SUPPRESSED' | 'FILTERED_PREFS' | 'FAILED') => {
+  // Skip if DynamoDB has been failing (rate limit retries)
+  if (!dynamoAvailable && lastError && (Date.now() - lastError.getTime()) < 30000) {
+    // Skip for 30 seconds after error
+    return;
+  }
+  
+  const command = new PutItemCommand({
+    TableName: 'NotificationLogs',
     Item: {
       id: { S: uuidv4() },
       userId: { S: event.targetId },
@@ -18,10 +32,18 @@ export const logNotification = async (event: any, status: 'SENT' | 'SUPPRESSED' 
     },
   });
 
-  try {
-    await client.send(command);
-    console.log(`📝 Logged to DynamoDB: ${status}`);
-  } catch (error) {
-    console.error('❌ DynamoDB Error:', error);
-  }
+  // Fire and forget - don't block on DynamoDB
+  client.send(command)
+    .then(() => {
+      dynamoAvailable = true;
+      console.log(`📝 Logged to DynamoDB: ${status}`);
+    })
+    .catch((error) => {
+      dynamoAvailable = false;
+      lastError = new Date();
+      // Only log first error, not every one
+      if (dynamoAvailable) {
+        console.error('❌ DynamoDB unavailable - logging disabled for 30s:', error.message);
+      }
+    });
 };

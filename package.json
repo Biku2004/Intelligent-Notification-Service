@@ -13,7 +13,9 @@
     "dev:backend": "node scripts/start-all.js",
     "build:backend": "cd backend/ingestion-service && npm run build && cd ../notification-api && npm run build && cd ../processing-service && npm run build && cd ../social-api && npm run build && cd ../email-service && npm run build && cd ../sms-service && npm run build && cd ../socket-service && npm run build",
     "prisma:migrate": "node scripts/setup-prisma.js migrate",
-    "prisma:generate": "node scripts/setup-prisma.js generate"
+    "prisma:generate": "node scripts/setup-prisma.js generate",
+    "test:aggregation": "node scripts/test-aggregation.js",
+    "fix:kafka": "node scripts/fix-kafka-groups.js"
   },
   "keywords": [
     "notification",
@@ -26,6 +28,9 @@
   "license": "ISC",
   "devDependencies": {
     "concurrently": "^8.2.2",
-    "chalk": "^4.1.2"
+    "chalk": "^4.1.2",
+    "axios": "^1.6.0",
+    "ioredis": "^5.3.2",
+    "kafkajs": "^2.2.4"
   }
 }

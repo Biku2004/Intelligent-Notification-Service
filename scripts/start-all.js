@@ -19,8 +19,8 @@ const services = [
   { name: 'notification-api', path: 'backend/notification-api', color: colors.green },
   { name: 'processing-service', path: 'backend/processing-service', color: colors.yellow },
   { name: 'social-api', path: 'backend/social-api', color: colors.blue },
-  { name: 'email-service', path: 'backend/email-service', color: colors.magenta },
-  { name: 'sms-service', path: 'backend/sms-service', color: colors.red },
+  // { name: 'email-service', path: 'backend/email-service', color: colors.magenta },
+  // { name: 'sms-service', path: 'backend/sms-service', color: colors.red },
   { name: 'socket-service', path: 'backend/socket-service', color: colors.cyan }
 ];
 

@@ -1,15 +1,6 @@
-// Shared Prisma Schema
-// This schema is shared across multiple services
-// Location: backend/processing-service/prisma/schema.prisma
-// 
-// To generate Prisma client in this service, run:
-// npx prisma generate --schema=../processing-service/prisma/schema.prisma
-//
-// Or use the npm script:
-// npm run prisma:generate
-
 generator client {
   provider = "prisma-client-js"
+  engineType = "binary"
 }
 
 datasource db {
@@ -37,138 +28,140 @@ model User {
   likes           Like[]
   following       Follow[] @relation("UserFollowing")
   followers       Follow[] @relation("UserFollowers")
-  bellSubscriptions BellSubscription[] @relation("BellSubscriber")
-  bellSubscribers   BellSubscription[] @relation("BellTarget")
+  bellSubscriptions BellSubscription[] @relation("UserBellSubscriptions")
+  bellSubscribedBy  BellSubscription[] @relation("TargetUserBellSubscriptions")
   notifications   NotificationHistory[]
 }
 
 // ========================================
-// 2. POSTS
+// 2. NOTIFICATION PREFERENCES
+// ========================================
+model NotificationPreference {
+  id              String  @id @default(uuid())
+  userId          String  @unique
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  emailEnabled    Boolean @default(true)
+  smsEnabled      Boolean @default(false)
+  pushEnabled     Boolean @default(true)
+  marketing       Boolean @default(false)
+  activity        Boolean @default(true)
+  social          Boolean @default(true)
+  dndEnabled      Boolean @default(false)
+  dndStartTime    String?
+  dndEndTime      String?
+  updatedAt       DateTime @updatedAt
+}
+
+// ========================================
+// 3. SOCIAL FEATURES
 // ========================================
 model Post {
   id              String   @id @default(uuid())
   userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   caption         String?
   imageUrl        String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   comments        Comment[]
   likes           Like[]
+  
+  @@index([userId])
+  @@index([createdAt])
 }
 
-// ========================================
-// 3. COMMENTS
-// ========================================
 model Comment {
   id              String   @id @default(uuid())
   postId          String
+  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   content         String
+  gifUrl          String?
   parentId        String?
+  parent          Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies         Comment[] @relation("CommentReplies")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
-  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  parent          Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies         Comment[] @relation("CommentReplies")
+  @@index([postId])
+  @@index([userId])
+  @@index([parentId])
 }
 
-// ========================================
-// 4. LIKES
-// ========================================
 model Like {
   id              String   @id @default(uuid())
   postId          String
+  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt       DateTime @default(now())
   
-  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
 }
 
-// ========================================
-// 5. FOLLOWS
-// ========================================
 model Follow {
   id              String   @id @default(uuid())
   followerId      String
+  follower        User     @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
   followingId     String
+  following       User     @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
   createdAt       DateTime @default(now())
   
-  follower        User     @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
-  following       User     @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
-  
   @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
 }
 
 // ========================================
-// 6. BELL SUBSCRIPTIONS (Post Notifications)
+// 4. BELL ICON SUBSCRIPTION
 // ========================================
 model BellSubscription {
   id              String   @id @default(uuid())
   subscriberId    String
+  subscriber      User     @relation("UserBellSubscriptions", fields: [subscriberId], references: [id], onDelete: Cascade)
   targetUserId    String
+  targetUser      User     @relation("TargetUserBellSubscriptions", fields: [targetUserId], references: [id], onDelete: Cascade)
+  enabled         Boolean  @default(true)
   createdAt       DateTime @default(now())
-  
-  subscriber      User     @relation("BellSubscriber", fields: [subscriberId], references: [id], onDelete: Cascade)
-  targetUser      User     @relation("BellTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  updatedAt       DateTime @updatedAt
   
   @@unique([subscriberId, targetUserId])
+  @@index([subscriberId])
+  @@index([targetUserId])
 }
 
 // ========================================
-// 7. NOTIFICATION HISTORY
+// 5. NOTIFICATION HISTORY
 // ========================================
 model NotificationHistory {
   id              String   @id @default(uuid())
   userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   type            String
   priority        String
+  actorId         String?
+  actorName       String?
+  actorAvatar     String?
   isAggregated    Boolean  @default(false)
   aggregatedCount Int      @default(1)
+  aggregatedIds   String[]
   title           String
   message         String
+  imageUrl        String?
+  targetType      String?
+  targetId        String?
   isRead          Boolean  @default(false)
+  readAt          DateTime?
+  deliveryStatus  String   @default("PENDING")
   channels        String[]
-  metadata        Json?
-  createdAt       DateTime @default(now())
-  
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-// ========================================
-// 8. NOTIFICATION PREFERENCES
-// ========================================
-model NotificationPreference {
-  id              String   @id @default(uuid())
-  userId          String   @unique
-  
-  // Channel preferences
-  emailEnabled    Boolean  @default(true)
-  smsEnabled      Boolean  @default(false)
-  pushEnabled     Boolean  @default(true)
-  
-  // Category preferences
-  marketing       Boolean  @default(false)
-  activity        Boolean  @default(true)
-  social          Boolean  @default(true)
-  
-  // Do Not Disturb
-  dndEnabled      Boolean  @default(false)
-  dndStartTime    String?  // HH:mm format
-  dndEndTime      String?  // HH:mm format
-  
-  // Contact info
-  email           String?
-  phone           String?
-  
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+  @@index([userId, isRead])
+  @@index([priority])
 }

@@ -1,10 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Heart, MessageCircle, Share2, Bookmark, UserPlus, UserCheck } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Bookmark, UserPlus, UserCheck, Send, ChevronDown, ChevronUp } from 'lucide-react';
 import axios from 'axios';
 import { SOCIAL_API_URL } from '../config/api';
 import { useAuth } from '../hooks/useAuth';
 import { PostTester } from './PostTester';
 import { UserProfile } from './UserProfile';
+
+interface Comment {
+  id: string;
+  content: string;
+  createdAt: string;
+  user: {
+    id: string;
+    username: string;
+    name: string | null;
+    avatarUrl: string | null;
+  };
+  replies?: Comment[];
+}
 
 interface Post {
   id: string;
@@ -35,6 +48,13 @@ export const Feed: React.FC = () => {
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [followedUsers, setFollowedUsers] = useState<Set<string>>(new Set());
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  
+  // Comments state
+  const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
+  const [postComments, setPostComments] = useState<Record<string, Comment[]>>({});
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+  const [loadingComments, setLoadingComments] = useState<Set<string>>(new Set());
+  const [submittingComment, setSubmittingComment] = useState<Set<string>>(new Set());
 
   const fetchPosts = async () => {
     try {
@@ -193,9 +213,99 @@ export const Feed: React.FC = () => {
     setSelectedUserId(userId);
   };
 
-  const handleComment = (postId: string) => {
-    console.log('Comment on post:', postId);
-    // TODO: Navigate to post detail page
+  // Fetch comments for a post
+  const fetchComments = async (postId: string) => {
+    try {
+      setLoadingComments(prev => new Set(prev).add(postId));
+      const token = localStorage.getItem('authToken');
+      const response = await axios.get(`${SOCIAL_API_URL}/api/comments?postId=${postId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      
+      setPostComments(prev => ({
+        ...prev,
+        [postId]: response.data.comments || []
+      }));
+    } catch (err: any) {
+      console.error('Failed to fetch comments:', err);
+    } finally {
+      setLoadingComments(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(postId);
+        return newSet;
+      });
+    }
+  };
+
+  // Toggle comments section
+  const handleComment = async (postId: string) => {
+    const isExpanded = expandedComments.has(postId);
+    
+    if (isExpanded) {
+      // Collapse
+      setExpandedComments(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(postId);
+        return newSet;
+      });
+    } else {
+      // Expand and fetch comments
+      setExpandedComments(prev => new Set(prev).add(postId));
+      if (!postComments[postId]) {
+        await fetchComments(postId);
+      }
+    }
+  };
+
+  // Submit a new comment
+  const submitComment = async (postId: string) => {
+    const content = commentInputs[postId]?.trim();
+    if (!content) return;
+    
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      alert('Please login to comment');
+      return;
+    }
+
+    try {
+      setSubmittingComment(prev => new Set(prev).add(postId));
+      
+      const response = await axios.post(
+        `${SOCIAL_API_URL}/api/comments`,
+        { postId, content },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Add the new comment to the list
+      setPostComments(prev => ({
+        ...prev,
+        [postId]: [response.data.comment, ...(prev[postId] || [])]
+      }));
+
+      // Update the comment count in posts
+      setPosts(prev => prev.map(post => {
+        if (post.id === postId) {
+          return {
+            ...post,
+            _count: { ...post._count, comments: post._count.comments + 1 }
+          };
+        }
+        return post;
+      }));
+
+      // Clear the input
+      setCommentInputs(prev => ({ ...prev, [postId]: '' }));
+    } catch (err: any) {
+      console.error('Failed to post comment:', err);
+      alert(err.response?.data?.error || 'Failed to post comment');
+    } finally {
+      setSubmittingComment(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(postId);
+        return newSet;
+      });
+    }
   };
 
   const formatTime = (dateString: string) => {
@@ -383,21 +493,109 @@ export const Feed: React.FC = () => {
                 </div>
               )}
 
-              {/* View Comments */}
-              {post._count.comments > 0 && (
-                <button
-                  onClick={() => handleComment(post.id)}
-                  className="text-gray-500 text-sm hover:text-gray-700"
-                >
-                  View all {post._count.comments} comments
-                </button>
-              )}
+              {/* Comments Section */}
+              <div className="border-t border-gray-100 mt-2 pt-2">
+                {/* View/Hide Comments Toggle */}
+                {post._count.comments > 0 && (
+                  <button
+                    onClick={() => handleComment(post.id)}
+                    className="text-gray-500 text-sm hover:text-gray-700 flex items-center gap-1 mb-2"
+                  >
+                    {expandedComments.has(post.id) ? (
+                      <>
+                        <ChevronUp className="w-4 h-4" />
+                        Hide comments
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="w-4 h-4" />
+                        View all {post._count.comments} comments
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {/* Expanded Comments List */}
+                {expandedComments.has(post.id) && (
+                  <div className="space-y-3 max-h-64 overflow-y-auto">
+                    {loadingComments.has(post.id) ? (
+                      <p className="text-gray-400 text-sm">Loading comments...</p>
+                    ) : postComments[post.id]?.length > 0 ? (
+                      postComments[post.id].map((comment) => (
+                        <div key={comment.id} className="flex gap-2">
+                          <img
+                            src={comment.user.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${comment.user.username}`}
+                            alt={comment.user.username}
+                            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm">
+                              <span className="font-semibold mr-2">
+                                {comment.user.username}
+                                {/* Show test badge for test users */}
+                                {comment.user.username.startsWith('test_') && (
+                                  <span className="ml-1 text-xs bg-purple-100 text-purple-600 px-1 rounded">test</span>
+                                )}
+                              </span>
+                              <span className="text-gray-800">{comment.content}</span>
+                            </p>
+                            <p className="text-xs text-gray-400 mt-0.5">{formatTime(comment.createdAt)}</p>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-400 text-sm">No comments yet</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Add Comment Input */}
+                <div className="flex items-center gap-2 mt-3 pt-2 border-t border-gray-100">
+                  <input
+                    type="text"
+                    placeholder="Add a comment..."
+                    value={commentInputs[post.id] || ''}
+                    onChange={(e) => setCommentInputs(prev => ({ ...prev, [post.id]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        submitComment(post.id);
+                      }
+                    }}
+                    className="flex-1 text-sm border-none outline-none placeholder-gray-400"
+                    disabled={submittingComment.has(post.id)}
+                  />
+                  <button
+                    onClick={() => submitComment(post.id)}
+                    disabled={!commentInputs[post.id]?.trim() || submittingComment.has(post.id)}
+                    className={`text-blue-500 font-semibold text-sm ${
+                      !commentInputs[post.id]?.trim() || submittingComment.has(post.id)
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'hover:text-blue-600'
+                    }`}
+                  >
+                    {submittingComment.has(post.id) ? (
+                      <span className="animate-pulse">...</span>
+                    ) : (
+                      <Send className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Post Tester - Auto-filled with post ID and user info */}
             <PostTester 
               postId={post.id}
+              postOwnerId={post.user.id}
               username={post.user.username}
+              onDataChange={() => {
+                // Refresh posts and comments when test data changes
+                fetchPosts();
+                if (expandedComments.has(post.id)) {
+                  fetchComments(post.id);
+                }
+              }}
             />
           </div>
           );

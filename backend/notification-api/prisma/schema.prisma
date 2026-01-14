@@ -51,6 +51,11 @@ model NotificationPreference {
   smsEnabled      Boolean  @default(false)
   pushEnabled     Boolean  @default(true)
   
+  // Category preferences
+  marketing       Boolean  @default(false)
+  activity        Boolean  @default(true)
+  social          Boolean  @default(true)
+  
   // Do Not Disturb
   dndEnabled      Boolean  @default(false)
   dndStartTime    String?  // HH:mm format

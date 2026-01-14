@@ -10,6 +10,7 @@ import { userRouter } from './routes/userRoutes';
 import { postRouter } from './routes/postRoutes';
 import { commentRouter } from './routes/commentRoutes';
 import { followRouter } from './routes/followRoutes';
+import { testRouter } from './routes/testRoutes';
 
 dotenv.config();
 
@@ -36,6 +37,7 @@ app.use('/api/users', userRouter);
 app.use('/api/posts', postRouter);
 app.use('/api/comments', commentRouter);
 app.use('/api/follows', followRouter);
+app.use('/api/test', testRouter); // Test routes for simulating bulk interactions
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

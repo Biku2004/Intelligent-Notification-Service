@@ -12,13 +12,14 @@ interface AggregationKey {
   targetEntityId?: string;
 }
 
-interface AggregatedData {
+export interface AggregatedData {
   actors: string[];
   actorNames: string[];
   actorAvatars: string[];
   firstEvent: NotificationEvent;
   lastTimestamp: string;
   count: number;
+  allEvents: NotificationEvent[]; // Store all events for batch DB writes
 }
 
 /**
@@ -72,11 +73,16 @@ export async function addToAggregationWindow(
 
   const redisKey = getAggregationKey(key, windowId);
   const metaKey = `${redisKey}:meta`;
+  const eventsKey = `${redisKey}:events`; // Store all events for batch writes
 
   try {
     // Add actor to sorted set (score = timestamp)
     const timestamp = new Date(event.timestamp).getTime();
     await redis.zadd(redisKey, timestamp, event.actorId);
+
+    // Store all events for batch DB writes
+    await redis.rpush(eventsKey, JSON.stringify(event));
+    await redis.expire(eventsKey, AGGREGATION_WINDOW_SECONDS + 10);
 
     // Store metadata about first event
     const exists = await redis.exists(metaKey);
@@ -118,39 +124,7 @@ export async function addToAggregationWindow(
       return { shouldSendNow: true };
     }
 
-    // Send aggregated at 3-4 (CRITICAL priority threshold)
-    if (currentCount === 3 || currentCount === 4) {
-      console.log(`\n🔥 ════════════════════════════════════════════════`);
-      console.log(`🔥 CRITICAL THRESHOLD: ${currentCount} ${event.type}s`);
-      console.log(`🔥 Status: Flushing with CRITICAL priority`);
-      console.log(`🔥 Target User: ${event.targetId}`);
-      console.log(`🔥 ════════════════════════════════════════════════\n`);
-      const aggregated = await flushAggregationWindow(redisKey, metaKey);
-      return { shouldSendNow: true, aggregatedData: aggregated };
-    }
-
-    // Send aggregated at 10 (double digits milestone)
-    if (currentCount === 10) {
-      console.log(`\n🎉 ════════════════════════════════════════════════`);
-      console.log(`🎉 MILESTONE: 10 ${event.type}s reached!`);
-      console.log(`🎉 Status: Flushing aggregated notification`);
-      console.log(`🎉 Target User: ${event.targetId}`);
-      console.log(`🎉 ════════════════════════════════════════════════\n`);
-      const aggregated = await flushAggregationWindow(redisKey, metaKey);
-      return { shouldSendNow: true, aggregatedData: aggregated };
-    }
-
-    // Flush if max batch size reached
-    if (currentCount >= MAX_BATCH_SIZE) {
-      console.log(`\n📦 ════════════════════════════════════════════════`);
-      console.log(`📦 BATCH LIMIT: ${MAX_BATCH_SIZE} events reached`);
-      console.log(`📦 Status: Flushing immediately`);
-      console.log(`📦 Target User: ${event.targetId}`);
-      console.log(`📦 ════════════════════════════════════════════════\n`);
-      const aggregated = await flushAggregationWindow(redisKey, metaKey);
-      return { shouldSendNow: true, aggregatedData: aggregated };
-    }
-
+    // For 3+ events: ALWAYS batch and wait for window expiry
     // Calculate wait time until window expires
     const windowStartTime = windowId * AGGREGATION_WINDOW_SECONDS * 1000;
     const windowEndTime = windowStartTime + (AGGREGATION_WINDOW_SECONDS * 1000);
@@ -161,13 +135,13 @@ export async function addToAggregationWindow(
     console.log(`⏳ QUEUED IN AGGREGATION WINDOW`);
     console.log(`⏳ Type: ${event.type}`);
     console.log(`⏳ Window ID: ${windowId}`);
-    console.log(`⏳ Current Count: ${currentCount}/${MAX_BATCH_SIZE}`);
-    console.log(`⏳ Wait Time: ${waitTimeSec}s until window flush`);
+    console.log(`⏳ Current Count: ${currentCount} events batched`);
+    console.log(`⏳ Wait Time: ~${waitTimeSec}s until window flush`);
     console.log(`⏳ Target User: ${event.targetId}`);
-    console.log(`⏳ Next threshold: ${currentCount < 10 ? '10' : '50'} events`);
+    console.log(`⏳ Message: Will show "${event.actorName} and ${currentCount - 1} others..."`);
     console.log(`⏳ ════════════════════════════════════════════════\n`);
     
-    // Otherwise, wait for window to close (5-9, 11-49 events)
+    // Wait for window to close - aggregated notification sent by flush job
     return { shouldSendNow: false };
   } catch (error) {
     console.error('❌ Aggregation error:', error);
@@ -184,9 +158,15 @@ async function flushAggregationWindow(
   metaKey: string
 ): Promise<AggregatedData | undefined> {
   try {
+    const eventsKey = `${redisKey}:events`;
+    
     // Get all actors (with scores)
     const actors = await redis.zrange(redisKey, 0, -1);
     const meta = JSON.parse((await redis.get(metaKey)) || '{}');
+    
+    // Get all stored events for batch DB writes
+    const eventStrings = await redis.lrange(eventsKey, 0, -1);
+    const allEvents = eventStrings.map(str => JSON.parse(str));
 
     if (!actors.length || !meta.firstEvent) {
       return undefined;
@@ -199,10 +179,11 @@ async function flushAggregationWindow(
       firstEvent: meta.firstEvent,
       lastTimestamp: new Date().toISOString(),
       count: actors.length,
+      allEvents, // Include all events for batch processing
     };
 
     // Delete keys (consumed)
-    await redis.del(redisKey, metaKey);
+    await redis.del(redisKey, metaKey, eventsKey);
 
     return aggregated;
   } catch (error) {
@@ -214,8 +195,13 @@ async function flushAggregationWindow(
 /**
  * Background job to flush expired windows
  * Call this every minute from processing service
+ * @param sendCallback - Function to send the aggregated notification
  */
-export async function flushExpiredWindows(): Promise<void> {
+export async function flushExpiredWindows(
+  sendCallback?: (aggregatedData: AggregatedData) => Promise<void>
+): Promise<AggregatedData[]> {
+  const flushedWindows: AggregatedData[] = [];
+  
   try {
     const currentWindowId = getCurrentWindowId();
     const previousWindowId = currentWindowId - 1;
@@ -224,25 +210,45 @@ export async function flushExpiredWindows(): Promise<void> {
     const pattern = `agg:*:${previousWindowId}`;
     const keys = await scanKeys(pattern);
 
-    console.log(`🔄 Flushing ${keys.length} expired aggregation windows...`);
+    console.log(`🔄 Flushing expired aggregation windows...`);
+    console.log(`   - currentWindowId=${currentWindowId}, previousWindowId=${previousWindowId}`);
+    console.log(`   - pattern=${pattern}`);
+    console.log(`   - matchedKeys=${keys.length}`);
+
+    if (keys.length === 0) {
+      const currentPattern = `agg:*:${currentWindowId}`;
+      const currentKeys = await scanKeys(currentPattern);
+      console.log(`ℹ️  No expired windows found. Current-window keys: ${currentKeys.length} (pattern=${currentPattern})`);
+    }
 
     for (const key of keys) {
       if (!key.endsWith(':meta')) {
         const metaKey = `${key}:meta`;
         const aggregated = await flushAggregationWindow(key, metaKey);
 
-        if (aggregated) {
-          // Send aggregated notification (to be implemented in consumer)
-          console.log(
-            `✅ Flushed aggregation: ${aggregated.count} actors for ${aggregated.firstEvent.type}`
-          );
-          // TODO: Produce aggregated notification to Kafka
+        if (aggregated && aggregated.count > 0) {
+          console.log(`\n📬 ════════════════════════════════════════════════`);
+          console.log(`📬 WINDOW EXPIRED - SENDING AGGREGATED NOTIFICATION`);
+          console.log(`📬 Type: ${aggregated.firstEvent.type}`);
+          console.log(`📬 Count: ${aggregated.count} events`);
+          console.log(`📬 Actors: ${aggregated.actorNames.slice(0, 3).join(', ')}${aggregated.count > 3 ? '...' : ''}`);
+          console.log(`📬 Target: ${aggregated.firstEvent.targetId}`);
+          console.log(`📬 ════════════════════════════════════════════════\n`);
+          
+          flushedWindows.push(aggregated);
+          
+          // Call the send callback if provided
+          if (sendCallback) {
+            await sendCallback(aggregated);
+          }
         }
       }
     }
   } catch (error) {
     console.error('❌ Error flushing expired windows:', error);
   }
+  
+  return flushedWindows;
 }
 
 /**

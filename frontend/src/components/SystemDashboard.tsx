@@ -43,12 +43,12 @@ interface PipelineNode {
 export const SystemDashboard: React.FC = () => {
   const [services, setServices] = useState<ServiceStatus[]>([
     { name: 'Social API', status: 'offline', port: 3003, messagesProcessed: 0 },
-    { name: 'Ingestion Service', status: 'offline', port: 3001, messagesProcessed: 0 },
-    { name: 'Processing Service', status: 'offline', port: 3005, messagesProcessed: 0 },
+    { name: 'Ingestion Service', status: 'offline', port: 3000, messagesProcessed: 0 },
+    { name: 'Processing Service', status: 'processing', port: 0, messagesProcessed: 0 }, // Kafka consumer only
     { name: 'Notification API', status: 'offline', port: 3002, messagesProcessed: 0 },
     { name: 'Socket Service', status: 'offline', port: 4000, messagesProcessed: 0 },
-    { name: 'Email Service', status: 'offline', port: 3006, messagesProcessed: 0 },
-    { name: 'SMS Service', status: 'offline', port: 3007, messagesProcessed: 0 },
+    { name: 'Email Service', status: 'processing', port: 0, messagesProcessed: 0 }, // Kafka consumer only
+    { name: 'SMS Service', status: 'processing', port: 0, messagesProcessed: 0 }, // Kafka consumer only
   ]);
 
   const [eventLogs, setEventLogs] = useState<EventLog[]>([]);
@@ -100,6 +100,7 @@ export const SystemDashboard: React.FC = () => {
   const checkServiceHealth = useCallback(async () => {
     const healthChecks = [
       { name: 'Social API', port: 3003, endpoint: '/health' },
+      { name: 'Ingestion Service', port: 3000, endpoint: '/health' },
       { name: 'Notification API', port: 3002, endpoint: '/health' },
       { name: 'Socket Service', port: 4000, endpoint: '/health' },
     ];
@@ -129,6 +130,10 @@ export const SystemDashboard: React.FC = () => {
             status: result.status as 'online' | 'offline' | 'processing',
             lastPing: result.lastPing,
           };
+        }
+        // Keep Kafka consumers in 'processing' state (no HTTP health endpoint)
+        if (service.port === 0) {
+          return { ...service, status: 'processing' };
         }
         return service;
       })
@@ -378,7 +383,9 @@ export const SystemDashboard: React.FC = () => {
                   <div className={`w-3 h-3 rounded-full ${getStatusColor(service.status)}`} />
                   <div>
                     <p className="font-medium">{service.name}</p>
-                    <p className="text-xs text-gray-500">Port {service.port}</p>
+                    <p className="text-xs text-gray-500">
+                      {service.port === 0 ? 'Kafka Consumer' : `Port ${service.port}`}
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -386,6 +393,11 @@ export const SystemDashboard: React.FC = () => {
                     <div className="flex items-center gap-2 text-green-400">
                       <CheckCircle className="w-4 h-4" />
                       <span className="text-sm">{service.lastPing}ms</span>
+                    </div>
+                  ) : service.status === 'processing' ? (
+                    <div className="flex items-center gap-2 text-yellow-400">
+                      <Activity className="w-4 h-4 animate-pulse" />
+                      <span className="text-sm">Running</span>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 text-red-400">
