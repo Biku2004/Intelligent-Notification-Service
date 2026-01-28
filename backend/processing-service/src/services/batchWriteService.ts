@@ -4,6 +4,7 @@
  */
 import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { NotificationEvent } from '../../../shared/types';
+import { clearPostCache, clearUserCache } from '../../../shared/services/redis-cache-service';
 import { v4 as uuidv4 } from 'uuid';
 
 // Lazily initialize Prisma client for social database so env vars can be loaded first

@@ -10,6 +10,7 @@ import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { authMiddleware, optionalAuthMiddleware, AuthRequest } from '../middleware/auth';
 import { sendNotificationEvent } from '../utils/kafka';
 import { v4 as uuidv4 } from 'uuid';
+import { incrementLikeCount, getLikeCount } from '../../../shared/services/redis-cache-service';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -151,11 +152,14 @@ router.get('/:postId', optionalAuthMiddleware, async (req: AuthRequest, res: Res
       isLiked = !!like;
     }
 
+    // Get like count from Redis cache (instant) or PostgreSQL (fallback)
+    const likesCount = await getLikeCount(postId, prisma);
+
     res.json({
       success: true,
       post: {
         ...post,
-        likesCount: post._count.likes,
+        likesCount,
         commentsCount: post._count.comments,
         isLiked,
       }
@@ -219,11 +223,17 @@ router.get('/', optionalAuthMiddleware, async (req: AuthRequest, res: Response) 
       likedPostIds = likes.map((l: any) => l.postId);
     }
 
-    const postsWithLikes = posts.map((post: any) => ({
-      ...post,
-      likesCount: post._count.likes,
-      commentsCount: post._count.comments,
-      isLiked: likedPostIds.includes(post.id),
+    // Get like counts from Redis cache (instant) for each post
+    const postsWithLikes = await Promise.all(posts.map(async (post: any) => {
+      const likesCount = await getLikeCount(post.id, prisma);
+      const commentsCount = post._count.comments; // Comments count from DB for now
+
+      return {
+        ...post,
+        likesCount,
+        commentsCount,
+        isLiked: likedPostIds.includes(post.id),
+      };
     }));
 
     res.json({
@@ -271,13 +281,10 @@ router.post('/:postId/like', authMiddleware, async (req: AuthRequest, res: Respo
       return;
     }
 
-    // Check if already liked (check in-memory or skip for now since we're batching)
-    // For now, we'll allow the like event to be sent to Kafka
-    // The batching system will handle duplicates with ON CONFLICT DO NOTHING
-
     // BATCHING: Don't write to DB immediately - let processing-service batch it
-    // Just send the Kafka event and return success
+    // Write to Redis cache for instant count updates
     let liked = true;
+    const newLikeCount = await incrementLikeCount(postId);
 
     // Send notification to post owner (if not self-like)
     if (post.userId !== userId) {
@@ -318,13 +325,13 @@ router.post('/:postId/like', authMiddleware, async (req: AuthRequest, res: Respo
       });
     }
 
-    // Get current like count (may be slightly stale due to batching, but that's okay)
-    const likesCount = await prisma.like.count({ where: { postId } });
+    // Get like count from Redis cache (instant) or PostgreSQL (fallback)
+    const likesCount = await getLikeCount(postId, prisma);
 
     res.json({
       success: true,
       liked,
-      likesCount: likesCount + 1 // Optimistic update
+      likesCount // Real-time count from Redis cache
     });
   } catch (error: any) {
     console.error('❌ Like/Unlike error:', error);

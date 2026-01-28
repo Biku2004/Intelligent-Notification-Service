@@ -9,6 +9,7 @@ import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import { sendNotificationEvent } from '../utils/kafka';
+import { incrementLikeCount, incrementCommentCount, incrementFollowCount } from '../../../shared/services/redis-cache-service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -98,7 +99,8 @@ router.post('/simulate-likes', async (req, res: Response) => {
         }
 
         // BATCHING: Don't write to DB immediately - let processing-service batch it
-        // The like will be written to DB after 2-minute aggregation window
+        // Write to Redis cache for instant count updates
+        await incrementLikeCount(postId);
 
         // Send notification through Kafka with follower info
         await sendNotificationEvent({
@@ -219,7 +221,9 @@ router.post('/simulate-comments', async (req, res: Response) => {
         });
 
         // BATCHING: Don't write to DB immediately - let processing-service batch it
+        // Write to Redis cache for instant count updates
         const commentId = uuidv4(); // Generate ID for metadata
+        await incrementCommentCount(postId);
 
         // Send notification through Kafka
         await sendNotificationEvent({
@@ -320,6 +324,8 @@ router.post('/simulate-follows', async (req, res: Response) => {
         });
 
         // BATCHING: Don't write to DB immediately - let processing-service batch it
+        // Write to Redis cache for instant count updates
+        await incrementFollowCount(targetUserId);
 
         // Send notification through Kafka
         await sendNotificationEvent({
