@@ -1,5 +1,5 @@
 // Enhanced Preference Service with Notification History Storage
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { NotificationEvent } from '../../../shared/types';
 
 const prisma = new PrismaClient({
@@ -13,7 +13,7 @@ const isTimeInWindow = (startStr: string, endStr: string): boolean => {
 
   const [startH, startM] = startStr.split(':').map(Number);
   const [endH, endM] = endStr.split(':').map(Number);
-  
+
   const startMinutes = startH * 60 + startM;
   const endMinutes = endH * 60 + endM;
 

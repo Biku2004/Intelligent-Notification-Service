@@ -5,7 +5,7 @@
  * /api/comments/:commentId/reply - Reply to comment (authenticated)
  */
 import express, { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { sendNotificationEvent } from '../utils/kafka';
 import { v4 as uuidv4 } from 'uuid';
@@ -63,7 +63,7 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
     // Send notification to post owner (if not self-comment)
     if (post.userId !== userId) {
       const commenter = comment.user;
-      
+
       await sendNotificationEvent({
         id: uuidv4(),
         type: 'COMMENT',
@@ -157,7 +157,7 @@ router.post('/:commentId/reply', authMiddleware, async (req: AuthRequest, res: R
     // Send notification to parent comment owner (if not self-reply)
     if (parentComment.userId !== userId) {
       const replier = reply.user;
-      
+
       await sendNotificationEvent({
         id: uuidv4(),
         type: 'COMMENT_REPLY',

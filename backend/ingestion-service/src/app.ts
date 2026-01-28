@@ -7,7 +7,11 @@ import eventRoutes from './routes/eventRoutes';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.INGESTION_PORT || 3000;
+
+// Import tracing
+import { tracingMiddleware } from '../../shared/middleware/tracing';
+import { Logger } from '../../shared/utils/logger';
 
 // CORS middleware - allow frontend to access
 app.use(cors({
@@ -17,6 +21,13 @@ app.use(cors({
 
 // Middleware to parse JSON bodies
 app.use(express.json());
+app.use(tracingMiddleware);
+
+// Request logging
+app.use((req, res, next) => {
+  Logger.info(`Incoming ${req.method} request to ${req.url}`);
+  next();
+});
 
 app.use('/api/events', eventRoutes);
 
@@ -30,7 +41,7 @@ const startServer = async () => {
 
   // 2. Start Express
   app.listen(PORT, () => {
-    console.log(`🚀 Ingestion Service running on port ${PORT}`);
+    Logger.info(`🚀 Ingestion Service running on port ${PORT}`);
   });
 };
 startServer();

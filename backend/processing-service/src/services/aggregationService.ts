@@ -1,9 +1,13 @@
 // Smart Aggregation Service with Redis-based Batching
 // Implements: "John and 5 others liked your post" logic
+// Enhanced with follower-based priority delivery
 import redis from '../config/redis';
 import { NotificationEvent, NotificationType } from '../../../shared/types';
 
-const AGGREGATION_WINDOW_SECONDS = 60; // 1 minute
+// Configuration for aggregation windows
+const AGGREGATION_WINDOW_SECONDS = 120; // 2 minutes for clear batching demonstration
+const INSTANT_LIKE_THRESHOLD = 3; // 1-3 likes = instant delivery
+const FOLLOWER_BATCH_THRESHOLD = 4; // 4+ from followers = batch
 const MAX_BATCH_SIZE = 50;
 
 interface AggregationKey {
@@ -113,24 +117,57 @@ export async function addToAggregationWindow(
     // Check batch size
     const currentCount = await redis.zcard(redisKey);
 
-    // Send immediately for first 1-2 likes (instant feedback)
-    if (currentCount <= 2) {
+    // Extract follower info from metadata
+    const isFromFollower = event.metadata?.isFromFollowedUser === true;
+    const isTestUser = event.metadata?.isTestUser === true;
+
+    // COMMENT and COMMENT_REPLY: ALWAYS batch and wait for window expiry
+    // This ensures all comments are collected before notification + DB write
+    const alwaysBatchTypes: NotificationType[] = ['COMMENT', 'COMMENT_REPLY'];
+
+    if (alwaysBatchTypes.includes(event.type)) {
+      // Calculate wait time until window expires
+      const windowStartTime = windowId * AGGREGATION_WINDOW_SECONDS * 1000;
+      const windowEndTime = windowStartTime + (AGGREGATION_WINDOW_SECONDS * 1000);
+      const waitTimeMs = windowEndTime - Date.now();
+      const waitTimeSec = Math.ceil(waitTimeMs / 1000);
+
+      console.log(`\n⏳ ════════════════════════════════════════════════`);
+      console.log(`⏳ QUEUED IN AGGREGATION WINDOW (ALWAYS BATCH)`);
+      console.log(`⏳ Type: ${event.type}`);
+      console.log(`⏳ Window ID: ${windowId}`);
+      console.log(`⏳ Current Count: ${currentCount} events batched`);
+      console.log(`⏳ Wait Time: ~${waitTimeSec}s until window flush`);
+      console.log(`⏳ Target User: ${event.targetId}`);
+      console.log(`⏳ Reason: Comments always wait for batch DB write + notification`);
+      console.log(`⏳ Message: Will show "${event.actorName}${currentCount > 1 ? ` and ${currentCount - 1} others` : ''}..."`);
+      console.log(`⏳ ════════════════════════════════════════════════\n`);
+
+      return { shouldSendNow: false };
+    }
+
+    // SMART NOTIFICATION LOGIC:
+    // 1-3 likes from ANY user = INSTANT notification to post creator
+    // This gives immediate feedback that someone liked the post
+    if (currentCount <= INSTANT_LIKE_THRESHOLD) {
       console.log(`\n⚡ ════════════════════════════════════════════════`);
       console.log(`⚡ INSTANT DELIVERY: ${event.type} #${currentCount}`);
-      console.log(`⚡ Reason: First ${currentCount} event(s) - immediate feedback`);
+      console.log(`⚡ Reason: 1-${INSTANT_LIKE_THRESHOLD} likes = immediate feedback`);
       console.log(`⚡ Target User: ${event.targetId}`);
       console.log(`⚡ Actor: ${event.actorName || event.actorId}`);
+      console.log(`⚡ Is Follower: ${isFromFollower ? 'Yes' : 'No'}`);
       console.log(`⚡ ════════════════════════════════════════════════\n`);
       return { shouldSendNow: true };
     }
 
-    // For 3+ events: ALWAYS batch and wait for window expiry
-    // Calculate wait time until window expires
+    // For 4+ likes, use follower-based batching logic:
+    // - Followers: Batch but with priority (show in notification)
+    // - Non-followers: Batch and wait for full window
     const windowStartTime = windowId * AGGREGATION_WINDOW_SECONDS * 1000;
     const windowEndTime = windowStartTime + (AGGREGATION_WINDOW_SECONDS * 1000);
     const waitTimeMs = windowEndTime - Date.now();
     const waitTimeSec = Math.ceil(waitTimeMs / 1000);
-    
+
     console.log(`\n⏳ ════════════════════════════════════════════════`);
     console.log(`⏳ QUEUED IN AGGREGATION WINDOW`);
     console.log(`⏳ Type: ${event.type}`);
@@ -138,9 +175,10 @@ export async function addToAggregationWindow(
     console.log(`⏳ Current Count: ${currentCount} events batched`);
     console.log(`⏳ Wait Time: ~${waitTimeSec}s until window flush`);
     console.log(`⏳ Target User: ${event.targetId}`);
+    console.log(`⏳ Is Follower: ${isFromFollower ? 'Yes (higher priority in notification)' : 'No'}`);
     console.log(`⏳ Message: Will show "${event.actorName} and ${currentCount - 1} others..."`);
     console.log(`⏳ ════════════════════════════════════════════════\n`);
-    
+
     // Wait for window to close - aggregated notification sent by flush job
     return { shouldSendNow: false };
   } catch (error) {
@@ -159,11 +197,11 @@ async function flushAggregationWindow(
 ): Promise<AggregatedData | undefined> {
   try {
     const eventsKey = `${redisKey}:events`;
-    
+
     // Get all actors (with scores)
     const actors = await redis.zrange(redisKey, 0, -1);
     const meta = JSON.parse((await redis.get(metaKey)) || '{}');
-    
+
     // Get all stored events for batch DB writes
     const eventStrings = await redis.lrange(eventsKey, 0, -1);
     const allEvents = eventStrings.map(str => JSON.parse(str));
@@ -201,7 +239,7 @@ export async function flushExpiredWindows(
   sendCallback?: (aggregatedData: AggregatedData) => Promise<void>
 ): Promise<AggregatedData[]> {
   const flushedWindows: AggregatedData[] = [];
-  
+
   try {
     const currentWindowId = getCurrentWindowId();
     const previousWindowId = currentWindowId - 1;
@@ -234,9 +272,9 @@ export async function flushExpiredWindows(
           console.log(`📬 Actors: ${aggregated.actorNames.slice(0, 3).join(', ')}${aggregated.count > 3 ? '...' : ''}`);
           console.log(`📬 Target: ${aggregated.firstEvent.targetId}`);
           console.log(`📬 ════════════════════════════════════════════════\n`);
-          
+
           flushedWindows.push(aggregated);
-          
+
           // Call the send callback if provided
           if (sendCallback) {
             await sendCallback(aggregated);
@@ -247,7 +285,7 @@ export async function flushExpiredWindows(
   } catch (error) {
     console.error('❌ Error flushing expired windows:', error);
   }
-  
+
   return flushedWindows;
 }
 

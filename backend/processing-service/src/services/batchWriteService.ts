@@ -2,18 +2,24 @@
  * Batch Write Service
  * Handles batched database writes for likes, comments, follows to reduce DB load
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { NotificationEvent } from '../../../shared/types';
 import { v4 as uuidv4 } from 'uuid';
 
-// Separate Prisma client for social database (using raw SQL to avoid schema conflicts)
-const socialDb = new PrismaClient({
-  datasources: {
-    db: {
-      url: process.env.SOCIAL_DATABASE_URL,
-    },
-  },
-});
+// Lazily initialize Prisma client for social database so env vars can be loaded first
+let socialDb: PrismaClient | null = null;
+function getSocialDb(): PrismaClient {
+  if (!socialDb) {
+    socialDb = new PrismaClient({
+      datasources: {
+        db: {
+          url: process.env.SOCIAL_DATABASE_URL,
+        },
+      },
+    });
+  }
+  return socialDb;
+}
 
 interface BatchWriteResult {
   success: boolean;
@@ -57,9 +63,9 @@ export async function batchWriteLikes(
       ON CONFLICT ("postId", "userId") DO NOTHING
     `;
 
-    const affectedRows = await socialDb.$executeRawUnsafe(query);
+    const affectedRows = await getSocialDb().$executeRawUnsafe(query);
     result.written = affectedRows as number;
-    
+
     console.log(`💾 ✅ Written: ${result.written} likes (${events.length - result.written} duplicates skipped)`);
     console.log(`💾 ════════════════════════════════════════════════\n`);
 
@@ -83,10 +89,13 @@ export async function batchWriteComments(
   try {
     const postId = events[0]?.targetEntityId;
     if (!postId) {
+      console.error('❌ No targetEntityId found in comment events');
       return { success: false, written: 0, errors: events.length };
     }
 
-    console.log(`\n💾 BATCH WRITE: ${events.length} comments to DB`);
+    console.log(`\n💾 ════════════════════════════════════════════════`);
+    console.log(`💾 BATCH WRITE: ${events.length} comments to DB`);
+    console.log(`💾 Post: ${postId}`);
 
     // Build bulk INSERT (generate IDs in Node; escape content)
     const values = events
@@ -102,10 +111,11 @@ export async function batchWriteComments(
       VALUES ${values}
     `;
 
-    const affectedRows = await socialDb.$executeRawUnsafe(query);
+    const affectedRows = await getSocialDb().$executeRawUnsafe(query);
     result.written = affectedRows as number;
 
-    console.log(`💾 ✅ Written: ${result.written} comments\n`);
+    console.log(`💾 ✅ Written: ${result.written} comments`);
+    console.log(`💾 ════════════════════════════════════════════════\n`);
     return result;
   } catch (error: any) {
     console.error('❌ Batch write comments error:', error.message);
@@ -144,7 +154,7 @@ export async function batchWriteFollows(
       ON CONFLICT ("followerId", "followingId") DO NOTHING
     `;
 
-    const affectedRows = await socialDb.$executeRawUnsafe(query);
+    const affectedRows = await getSocialDb().$executeRawUnsafe(query);
     result.written = affectedRows as number;
 
     console.log(`💾 ✅ Written: ${result.written} follows\n`);
@@ -158,11 +168,68 @@ export async function batchWriteFollows(
 }
 
 /**
+ * Batch write notification history to database
+ * Writes aggregated notification to notification history table
+ */
+export async function batchWriteNotificationHistory(
+  aggregatedNotification: NotificationEvent
+): Promise<BatchWriteResult> {
+  const result: BatchWriteResult = { success: true, written: 0, errors: 0 };
+
+  try {
+    console.log(`\n💾 ════════════════════════════════════════════════`);
+    console.log(`💾 BATCH WRITE: Notification History to DB`);
+    console.log(`💾 Type: ${aggregatedNotification.type}`);
+    console.log(`💾 Target: ${aggregatedNotification.targetId}`);
+    console.log(`💾 Aggregated: ${aggregatedNotification.metadata?.isAggregated ? 'Yes' : 'No'}`);
+    console.log(`💾 Count: ${aggregatedNotification.metadata?.aggregatedCount || 1}`);
+
+    // Use Prisma for notification history (simpler than raw SQL for this case)
+    const prisma = new PrismaClient();
+
+    await prisma.notificationHistory.create({
+      data: {
+        userId: aggregatedNotification.targetId,
+        type: aggregatedNotification.type,
+        priority: aggregatedNotification.priority,
+        actorId: aggregatedNotification.actorId,
+        actorName: aggregatedNotification.actorName || 'Someone',
+        actorAvatar: aggregatedNotification.actorAvatar,
+        isAggregated: !!aggregatedNotification.metadata?.isAggregated,
+        aggregatedCount: aggregatedNotification.metadata?.aggregatedCount || 1,
+        aggregatedIds: aggregatedNotification.metadata?.aggregatedActors || [],
+        title: aggregatedNotification.title || 'New notification',
+        message: aggregatedNotification.message || '',
+        imageUrl: aggregatedNotification.imageUrl,
+        targetType: aggregatedNotification.targetType,
+        targetId: aggregatedNotification.targetEntityId,
+        isRead: false,
+        deliveryStatus: 'SENT',
+        channels: aggregatedNotification.metadata?.channels || [],
+      }
+    });
+
+    result.written = 1;
+    console.log(`💾 ✅ Written: 1 notification history record`);
+    console.log(`💾 ════════════════════════════════════════════════\n`);
+
+    await prisma.$disconnect();
+    return result;
+  } catch (error: any) {
+    console.error('❌ Batch write notification history error:', error.message);
+    result.success = false;
+    result.errors = 1;
+    return result;
+  }
+}
+
+/**
  * Main batch write handler - routes to correct write function
  */
 export async function executeBatchWrite(
   events: NotificationEvent[]
 ): Promise<BatchWriteResult> {
+
   if (events.length === 0) {
     return { success: true, written: 0, errors: 0 };
   }

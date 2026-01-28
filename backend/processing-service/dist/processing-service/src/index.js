@@ -12,9 +12,18 @@ const dynamoService_1 = require("./services/dynamoService");
 const preferenceService_1 = require("./services/preferenceService");
 const types_1 = require("../../shared/types");
 const initTopics_1 = require("./config/initTopics");
-const client_1 = require("@prisma/client");
+const client_1 = require("../shared/prisma/generated/client");
 // Make env loading deterministic even when started from a different cwd (e.g. scripts/start-all.js)
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '..', '.env') });
+// Global error handlers to prevent silent crashes
+process.on('uncaughtException', (err) => {
+    console.error('💀 UNCAUGHT EXCEPTION:', err);
+    process.exit(1);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('💀 UNHANDLED REJECTION at:', promise, 'reason:', reason);
+    // Don't exit - just log so consumer keeps running
+});
 const prisma = new client_1.PrismaClient();
 /**
  * Determine delivery channels based on notification priority
@@ -74,9 +83,10 @@ function attachConsumerLifecycleLogs(consumer, name) {
     consumer.on(events.CRASH, (e) => {
         const errMsg = e?.payload?.error?.message || e?.payload?.error || 'unknown crash';
         console.error(`💥 [${name}] CRASH:`, errMsg);
-        // In dev we prefer a hard restart over silently running with no consumers.
-        // nodemon will restart the process.
-        setTimeout(() => process.exit(1), 250);
+        // CRITICAL: Force immediate exit so nodemon restarts everything.
+        // Without this, other consumers keep running but this one stays dead.
+        console.error(`🔥 FATAL: Consumer ${name} crashed - forcing process exit for clean restart`);
+        process.exit(1);
     });
 }
 function safeParseEvent(rawValue, source) {
@@ -92,6 +102,7 @@ function safeParseEvent(rawValue, source) {
  * Process notification event with aggregation and filtering
  */
 async function processNotificationEvent(event) {
+    const startTime = Date.now();
     console.log(`\n📥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`📥 INCOMING: ${event.type} | Priority: ${event.priority}`);
     console.log(`📥 Target User: ${event.targetId}`);
@@ -99,13 +110,24 @@ async function processNotificationEvent(event) {
     console.log(`📥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     try {
         // 1. Preference Check (DND, muted categories, etc.)
-        const isPreferred = await (0, preferenceService_1.checkUserPreferences)(event.targetId, event.type);
+        console.log(`📥 Step 1: Checking preferences...`);
+        let isPreferred = true;
+        try {
+            isPreferred = await (0, preferenceService_1.checkUserPreferences)(event.targetId, event.type);
+        }
+        catch (prefError) {
+            console.error(`⚠️ Preference check failed, allowing by default:`, prefError);
+        }
         if (!isPreferred) {
-            await (0, dynamoService_1.logNotification)(event, 'FILTERED_PREFS');
+            try {
+                await (0, dynamoService_1.logNotification)(event, 'FILTERED_PREFS');
+            }
+            catch { }
             console.log(`🚫 Filtered by preferences: ${event.type} for ${event.targetId}`);
             return;
         }
         // 2. Aggregation Check (for social notifications)
+        console.log(`📥 Step 2: Checking aggregation...`);
         const aggregationResult = await (0, aggregationService_1.addToAggregationWindow)(event);
         if (!aggregationResult.shouldSendNow) {
             // Added to aggregation window, wait for flush
@@ -155,6 +177,7 @@ async function processNotificationEvent(event) {
         };
         console.log(`📡 [${finalEvent.priority}] Delivery Channels: [${channels.join(', ')}]`);
         // 5. Send to delivery topic
+        console.log(`📤 Sending to ready-notifications...`);
         await producer.send({
             topic: types_1.KAFKA_TOPICS.READY,
             messages: [{
@@ -166,9 +189,11 @@ async function processNotificationEvent(event) {
                     },
                 }],
         });
-        // 6. Log to DynamoDB
-        await (0, dynamoService_1.logNotification)(finalEvent, 'SENT');
+        console.log(`📤 Sent to ready-notifications!`);
+        // 6. Log to DynamoDB (fire and forget - non-blocking)
+        (0, dynamoService_1.logNotification)(finalEvent, 'SENT');
         // 7. Save to PostgreSQL for persistence
+        console.log(`💾 Saving to PostgreSQL...`);
         try {
             await prisma.notificationHistory.create({
                 data: {
@@ -197,15 +222,20 @@ async function processNotificationEvent(event) {
             console.error(`❌ PostgreSQL save error:`, dbError);
             // Don't fail the entire operation if DB save fails
         }
+        const duration = Date.now() - startTime;
         console.log(`\n✅ ════════════════════════════════════════════════`);
         console.log(`✅ DELIVERED: ${event.type} | Priority: ${finalEvent.priority}`);
         console.log(`✅ Target: ${event.targetId}`);
         console.log(`✅ Message: ${finalEvent.message?.substring(0, 50)}...`);
+        console.log(`✅ Duration: ${duration}ms`);
         console.log(`✅ ════════════════════════════════════════════════\n`);
     }
     catch (error) {
         console.error(`❌ Error processing event:`, error);
-        await (0, dynamoService_1.logNotification)(event, 'FAILED');
+        try {
+            await (0, dynamoService_1.logNotification)(event, 'FAILED');
+        }
+        catch { }
     }
 }
 /**
@@ -415,18 +445,39 @@ async function startService() {
         // Connect producer
         await producer.connect();
         console.log('✅ Kafka producer connected');
-        // Start all consumers
-        await Promise.all([
-            startCriticalConsumer(),
-            startHighPriorityConsumer(),
-            startLowPriorityConsumer(),
-        ]);
+        // Start all consumers SEQUENTIALLY with error handling
+        // (Promise.all can hide async errors from consumer.run())
+        console.log('\n🚦 Starting consumers sequentially...');
+        try {
+            await startCriticalConsumer();
+        }
+        catch (err) {
+            console.error('❌ Critical consumer failed to start:', err);
+        }
+        try {
+            await startHighPriorityConsumer();
+        }
+        catch (err) {
+            console.error('❌ High priority consumer failed to start:', err);
+            // This is critical - exit so nodemon restarts
+            throw err;
+        }
+        try {
+            await startLowPriorityConsumer();
+        }
+        catch (err) {
+            console.error('❌ Low priority consumer failed to start:', err);
+        }
         // Start aggregation flush job
         startAggregationFlushJob();
         console.log('🚀 Processing Service Ready!');
         console.log('   - Critical (P0): OTPs, Security');
         console.log('   - High (P1): Social interactions');
         console.log('   - Low (P2): Marketing, Digests');
+        // Heartbeat to confirm service is alive
+        setInterval(() => {
+            console.log(`💓 Heartbeat: ${new Date().toISOString()} - Consumers should be running`);
+        }, 60000); // Every minute
     }
     catch (error) {
         console.error('❌ Failed to start processing service:', error);

@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node dist/server.js",
     "dev": "nodemon",
-    "build": "tsc"
+    "build": "tsc",
+    "prisma:generate": "prisma generate --schema=../shared/prisma/schema.prisma"
   },
   "keywords": [],
   "author": "",

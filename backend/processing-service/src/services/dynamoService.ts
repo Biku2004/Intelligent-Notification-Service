@@ -2,9 +2,12 @@ import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { v4 as uuidv4 } from 'uuid';
 
 const client = new DynamoDBClient({
-  region: 'us-east-1',
-  endpoint: 'http://localhost:8000', // Docker DynamoDB
-  credentials: { accessKeyId: 'dummy', secretAccessKey: 'dummy' },
+  region: process.env.AWS_REGION || 'us-east-1',
+  endpoint: process.env.DYNAMO_ENDPOINT || 'http://localhost:8000',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'local',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'local',
+  },
   requestHandler: {
     requestTimeout: 3000, // 3 second timeout
   } as any,
@@ -20,7 +23,7 @@ export const logNotification = async (event: any, status: 'SENT' | 'SUPPRESSED' 
     // Skip for 30 seconds after error
     return;
   }
-  
+
   const command = new PutItemCommand({
     TableName: 'NotificationLogs',
     Item: {
@@ -29,6 +32,7 @@ export const logNotification = async (event: any, status: 'SENT' | 'SUPPRESSED' 
       type: { S: event.type },
       status: { S: status },
       timestamp: { S: new Date().toISOString() },
+      expiresAt: { N: Math.floor((Date.now() / 1000) + (30 * 24 * 60 * 60)).toString() }, // TTL: 30 days
     },
   });
 

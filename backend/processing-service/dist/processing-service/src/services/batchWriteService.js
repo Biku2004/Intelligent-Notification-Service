@@ -8,7 +8,7 @@ exports.executeBatchWrite = executeBatchWrite;
  * Batch Write Service
  * Handles batched database writes for likes, comments, follows to reduce DB load
  */
-const client_1 = require("@prisma/client");
+const client_1 = require("../../shared/prisma/generated/client");
 const uuid_1 = require("uuid");
 // Separate Prisma client for social database (using raw SQL to avoid schema conflicts)
 const socialDb = new client_1.PrismaClient({
@@ -68,9 +68,12 @@ async function batchWriteComments(events) {
     try {
         const postId = events[0]?.targetEntityId;
         if (!postId) {
+            console.error('❌ No targetEntityId found in comment events');
             return { success: false, written: 0, errors: events.length };
         }
-        console.log(`\n💾 BATCH WRITE: ${events.length} comments to DB`);
+        console.log(`\n💾 ════════════════════════════════════════════════`);
+        console.log(`💾 BATCH WRITE: ${events.length} comments to DB`);
+        console.log(`💾 Post: ${postId}`);
         // Build bulk INSERT (generate IDs in Node; escape content)
         const values = events
             .map((event) => {
@@ -85,7 +88,8 @@ async function batchWriteComments(events) {
     `;
         const affectedRows = await socialDb.$executeRawUnsafe(query);
         result.written = affectedRows;
-        console.log(`💾 ✅ Written: ${result.written} comments\n`);
+        console.log(`💾 ✅ Written: ${result.written} comments`);
+        console.log(`💾 ════════════════════════════════════════════════\n`);
         return result;
     }
     catch (error) {

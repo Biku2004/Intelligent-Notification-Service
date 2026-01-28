@@ -3,7 +3,7 @@
  * Shows real-time flow of events through the system like n8n workflow
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
+import {
   Zap, Database, Bell, Mail, MessageSquare, Smartphone,
   Server, Activity, CheckCircle, XCircle, Clock, Users,
   ArrowRight, RefreshCw, Cpu, HardDrive, Wifi, AlertTriangle
@@ -58,7 +58,39 @@ export const SystemDashboard: React.FC = () => {
     eventsPerMinute: 0,
     avgProcessingTime: 0,
     activeConnections: 0,
+    // Real pipeline stats
+    totalNotifications: 0,
+    totalUsers: 0,
+    fallbackPending: 0,
+    fallbackFailed: 0
   });
+
+  // Fetch real system stats
+  const fetchStats = async () => {
+    try {
+      const response = await fetch('http://localhost:3002/api/admin/stats');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setStats(prev => ({
+            ...prev,
+            totalUsers: data.stats.users,
+            totalNotifications: data.stats.notifications.total,
+            fallbackPending: data.stats.system?.fallbackQueue?.pending || 0,
+            fallbackFailed: data.stats.system?.fallbackQueue?.failed || 0,
+          }));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch admin stats', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+    const interval = setInterval(fetchStats, 10000); // Refresh every 10s
+    return () => clearInterval(interval);
+  }, []);
 
   // Simulated pipeline nodes
   const [pipelineNodes] = useState<PipelineNode[]>([
@@ -121,7 +153,7 @@ export const SystemDashboard: React.FC = () => {
       })
     );
 
-    setServices(prevServices => 
+    setServices(prevServices =>
       prevServices.map(service => {
         const result = results.find(r => r.name === service.name);
         if (result) {
@@ -145,10 +177,10 @@ export const SystemDashboard: React.FC = () => {
     const timeoutId = setTimeout(() => {
       checkServiceHealth();
     }, 100);
-    
+
     // Set up interval for periodic checks
     const interval = setInterval(checkServiceHealth, 5000);
-    
+
     return () => {
       clearTimeout(timeoutId);
       clearInterval(interval);
@@ -176,7 +208,7 @@ export const SystemDashboard: React.FC = () => {
     setTimeout(() => setActiveFlow('delivery'), 2500);
     setTimeout(() => {
       setActiveFlow(null);
-      setEventLogs(prev => 
+      setEventLogs(prev =>
         prev.map(e => e.id === newEvent.id ? { ...e, status: 'success' } : e)
       );
       setStats(prev => ({
@@ -238,8 +270,8 @@ export const SystemDashboard: React.FC = () => {
               <Activity className="w-6 h-6 text-purple-400" />
             </div>
             <div>
-              <p className="text-gray-400 text-sm">Total Events</p>
-              <p className="text-2xl font-bold">{stats.totalEvents}</p>
+              <p className="text-gray-400 text-sm">Total Notifications</p>
+              <p className="text-2xl font-bold">{stats.totalNotifications || stats.totalEvents}</p>
             </div>
           </div>
         </div>
@@ -249,8 +281,8 @@ export const SystemDashboard: React.FC = () => {
               <Zap className="w-6 h-6 text-green-400" />
             </div>
             <div>
-              <p className="text-gray-400 text-sm">Events/Min</p>
-              <p className="text-2xl font-bold">{stats.eventsPerMinute}</p>
+              <p className="text-gray-400 text-sm">Total Users</p>
+              <p className="text-2xl font-bold">{stats.totalUsers}</p>
             </div>
           </div>
         </div>
@@ -260,8 +292,8 @@ export const SystemDashboard: React.FC = () => {
               <Clock className="w-6 h-6 text-blue-400" />
             </div>
             <div>
-              <p className="text-gray-400 text-sm">Avg Processing</p>
-              <p className="text-2xl font-bold">{stats.avgProcessingTime}ms</p>
+              <p className="text-gray-400 text-sm">Pending Fallback</p>
+              <p className="text-2xl font-bold">{stats.fallbackPending}</p>
             </div>
           </div>
         </div>
@@ -284,12 +316,12 @@ export const SystemDashboard: React.FC = () => {
           <Cpu className="w-5 h-5 text-purple-400" />
           Notification Pipeline
         </h2>
-        
+
         {/* Pipeline Flow */}
         <div className="flex items-center justify-between relative">
           {/* Connection Lines */}
           <div className="absolute top-1/2 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500 opacity-30" />
-          
+
           {pipelineNodes.map((node, index) => (
             <React.Fragment key={node.id}>
               {/* Node */}
@@ -297,7 +329,7 @@ export const SystemDashboard: React.FC = () => {
                 className={`relative z-10 bg-gray-900 border-2 rounded-xl p-4 w-48 transition-all duration-300 ${getStatusBorder(node.id)}`}
               >
                 <div className={`absolute -top-2 -right-2 w-4 h-4 rounded-full ${getStatusColor(activeFlow === node.id ? 'processing' : node.status)}`} />
-                
+
                 <div className="flex items-center gap-3 mb-3">
                   <div className={`p-2 rounded-lg ${activeFlow === node.id ? 'bg-purple-500 text-white' : 'bg-gray-700 text-gray-300'}`}>
                     {node.icon}
@@ -306,9 +338,9 @@ export const SystemDashboard: React.FC = () => {
                     <h3 className="font-semibold text-white">{node.name}</h3>
                   </div>
                 </div>
-                
+
                 <p className="text-xs text-gray-400 mb-3">{node.description}</p>
-                
+
                 <div className="grid grid-cols-3 gap-1 text-xs">
                   <div className="text-center">
                     <p className="text-green-400 font-bold">{node.metrics.processed}</p>
@@ -372,7 +404,7 @@ export const SystemDashboard: React.FC = () => {
             <Server className="w-5 h-5 text-green-400" />
             Services Status
           </h2>
-          
+
           <div className="space-y-3">
             {services.map(service => (
               <div
@@ -417,7 +449,7 @@ export const SystemDashboard: React.FC = () => {
             <Activity className="w-5 h-5 text-blue-400" />
             Event Log
           </h2>
-          
+
           <div className="space-y-2 max-h-80 overflow-y-auto">
             {eventLogs.length === 0 ? (
               <p className="text-gray-500 text-center py-8">No events yet. Click simulate buttons above.</p>
@@ -425,20 +457,18 @@ export const SystemDashboard: React.FC = () => {
               eventLogs.map(log => (
                 <div
                   key={log.id}
-                  className={`p-3 rounded-lg border-l-4 ${
-                    log.status === 'success' ? 'bg-green-900/20 border-green-500' :
+                  className={`p-3 rounded-lg border-l-4 ${log.status === 'success' ? 'bg-green-900/20 border-green-500' :
                     log.status === 'error' ? 'bg-red-900/20 border-red-500' :
-                    log.status === 'processing' ? 'bg-yellow-900/20 border-yellow-500' :
-                    'bg-gray-900 border-gray-600'
-                  }`}
+                      log.status === 'processing' ? 'bg-yellow-900/20 border-yellow-500' :
+                        'bg-gray-900 border-gray-600'
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        log.priority === 'CRITICAL' ? 'bg-red-500' :
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${log.priority === 'CRITICAL' ? 'bg-red-500' :
                         log.priority === 'HIGH' ? 'bg-orange-500' :
-                        'bg-blue-500'
-                      }`}>
+                          'bg-blue-500'
+                        }`}>
                         {log.type}
                       </span>
                       <span className="text-sm text-gray-300">{log.message}</span>
@@ -460,7 +490,7 @@ export const SystemDashboard: React.FC = () => {
           <HardDrive className="w-5 h-5 text-yellow-400" />
           System Architecture
         </h2>
-        
+
         <div className="grid grid-cols-5 gap-4 text-center">
           {/* Layer 1: Frontend */}
           <div className="col-span-5 mb-4">

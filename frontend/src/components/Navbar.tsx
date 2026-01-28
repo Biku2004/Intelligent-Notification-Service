@@ -1,9 +1,9 @@
 import React from 'react';
-import { Home, Search, PlusSquare, User, Settings, FlaskConical, LayoutDashboard } from 'lucide-react';
+import { Home, Search, PlusSquare, User, Settings, FlaskConical, LayoutDashboard, Database } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 
 interface NavbarProps {
-  onNavigate: (page: 'feed' | 'preferences' | 'profile' | 'tester' | 'dashboard') => void;
+  onNavigate: (page: 'feed' | 'preferences' | 'profile' | 'tester' | 'dashboard' | 'database') => void;
   currentPage: string;
   onCreatePost: () => void;
   onProfileClick: () => void;
@@ -25,9 +25,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onCreat
           <div className="flex items-center gap-6">
             <button
               onClick={() => onNavigate('feed')}
-              className={`p-2 rounded-lg transition-colors ${
-                currentPage === 'feed' ? 'bg-gray-800' : 'hover:bg-gray-800'
-              }`}
+              className={`p-2 rounded-lg transition-colors ${currentPage === 'feed' ? 'bg-gray-800' : 'hover:bg-gray-800'
+                }`}
               aria-label="Home"
             >
               <Home size={24} />
@@ -52,9 +51,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onCreat
 
             <button
               onClick={() => onNavigate('preferences')}
-              className={`p-2 rounded-lg transition-colors ${
-                currentPage === 'preferences' ? 'bg-gray-800' : 'hover:bg-gray-800'
-              }`}
+              className={`p-2 rounded-lg transition-colors ${currentPage === 'preferences' ? 'bg-gray-800' : 'hover:bg-gray-800'
+                }`}
               aria-label="Settings"
             >
               <Settings size={24} />
@@ -62,9 +60,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onCreat
 
             <button
               onClick={() => onNavigate('tester')}
-              className={`p-2 rounded-lg transition-colors ${
-                currentPage === 'tester' ? 'bg-gray-800 text-green-400' : 'hover:bg-gray-800 text-green-500'
-              }`}
+              className={`p-2 rounded-lg transition-colors ${currentPage === 'tester' ? 'bg-gray-800 text-green-400' : 'hover:bg-gray-800 text-green-500'
+                }`}
               aria-label="Notification Tester"
               title="Test Notifications"
             >
@@ -73,9 +70,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onCreat
 
             <button
               onClick={() => onNavigate('dashboard')}
-              className={`p-2 rounded-lg transition-colors ${
-                currentPage === 'dashboard' ? 'bg-gray-800 text-cyan-400' : 'hover:bg-gray-800 text-cyan-500'
-              }`}
+              className={`p-2 rounded-lg transition-colors ${currentPage === 'dashboard' ? 'bg-gray-800 text-cyan-400' : 'hover:bg-gray-800 text-cyan-500'
+                }`}
               aria-label="System Dashboard"
               title="System Dashboard"
             >
@@ -83,10 +79,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onCreat
             </button>
 
             <button
+              onClick={() => onNavigate('database')}
+              className={`p-2 rounded-lg transition-colors ${currentPage === 'database' ? 'bg-gray-800 text-orange-400' : 'hover:bg-gray-800 text-orange-500'
+                }`}
+              aria-label="Database Viewer"
+              title="Database Monitor"
+            >
+              <Database size={24} />
+            </button>
+
+            <button
               onClick={onProfileClick}
-              className={`p-2 rounded-lg transition-colors ${
-                currentPage === 'profile' ? 'bg-gray-800' : 'hover:bg-gray-800'
-              }`}
+              className={`p-2 rounded-lg transition-colors ${currentPage === 'profile' ? 'bg-gray-800' : 'hover:bg-gray-800'
+                }`}
               aria-label="Profile"
             >
               <User size={24} />

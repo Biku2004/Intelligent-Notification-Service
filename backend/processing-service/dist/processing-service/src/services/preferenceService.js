@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.saveNotificationHistory = exports.checkUserPreferences = void 0;
 // Enhanced Preference Service with Notification History Storage
-const client_1 = require("@prisma/client");
+const client_1 = require("../../shared/prisma/generated/client");
 const prisma = new client_1.PrismaClient({
     log: ['error', 'warn'],
 });

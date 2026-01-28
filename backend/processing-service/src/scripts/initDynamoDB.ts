@@ -34,10 +34,6 @@ const createNotificationLogsTable = async () => {
           { AttributeName: 'createdAt', KeyType: 'RANGE' },
         ],
         Projection: { ProjectionType: 'ALL' },
-        ProvisionedThroughput: {
-          ReadCapacityUnits: 5,
-          WriteCapacityUnits: 5,
-        },
       },
       {
         IndexName: 'PriorityIndex',
@@ -46,16 +42,9 @@ const createNotificationLogsTable = async () => {
           { AttributeName: 'createdAt', KeyType: 'RANGE' },
         ],
         Projection: { ProjectionType: 'ALL' },
-        ProvisionedThroughput: {
-          ReadCapacityUnits: 5,
-          WriteCapacityUnits: 5,
-        },
       },
     ],
-    ProvisionedThroughput: {
-      ReadCapacityUnits: 10,
-      WriteCapacityUnits: 10,
-    },
+    BillingMode: 'PAY_PER_REQUEST', // On-Demand capacity for bursty/unpredictable load
   };
 
   try {
@@ -69,6 +58,27 @@ const createNotificationLogsTable = async () => {
       console.error('❌ Error creating table:', error);
       throw error;
     }
+  }
+
+  // Enable TTL (must be done after table creation)
+  try {
+    // Wait for table to be active
+    const { waitUntilTableExists } = await import('@aws-sdk/client-dynamodb');
+    await waitUntilTableExists({ client, maxWaitTime: 20 }, { TableName: 'NotificationLogs' });
+
+    const { UpdateTimeToLiveCommand } = await import('@aws-sdk/client-dynamodb');
+    const updateTTLCommand = new UpdateTimeToLiveCommand({
+      TableName: 'NotificationLogs',
+      TimeToLiveSpecification: {
+        Enabled: true,
+        AttributeName: 'expiresAt',
+      },
+    });
+
+    await client.send(updateTTLCommand);
+    console.log('✅ TTL enabled on NotificationLogs table');
+  } catch (error) {
+    console.error('⚠️  Error enabling TTL (might be already enabled):', error);
   }
 };
 

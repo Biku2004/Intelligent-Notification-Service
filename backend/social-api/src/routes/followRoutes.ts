@@ -6,7 +6,7 @@
  * /api/follows/:userId/bell - Toggle bell subscription (authenticated)
  */
 import express, { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { sendNotificationEvent } from '../utils/kafka';
 import { v4 as uuidv4 } from 'uuid';
@@ -56,7 +56,7 @@ router.post('/:userId', authMiddleware, async (req: AuthRequest, res: Response) 
       await prisma.follow.delete({
         where: { id: existingFollow.id }
       });
-      
+
       // Also remove bell subscription
       await prisma.bellSubscription.deleteMany({
         where: {
@@ -149,7 +149,7 @@ router.get('/:userId/followers', async (req: AuthRequest, res: Response) => {
 
     res.json({
       success: true,
-      followers: followers.map(f => f.follower)
+      followers: followers.map((f: any) => f.follower)
     });
   } catch (error: any) {
     console.error('❌ Get followers error:', error);
@@ -182,7 +182,7 @@ router.get('/:userId/following', async (req: AuthRequest, res: Response) => {
 
     res.json({
       success: true,
-      following: following.map(f => f.following)
+      following: following.map((f: any) => f.following)
     });
   } catch (error: any) {
     console.error('❌ Get following error:', error);

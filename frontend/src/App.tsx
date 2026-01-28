@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { SocketProvider } from './context/SocketProvider';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import { useSocket } from './hooks/useSocket';
@@ -14,8 +15,9 @@ import { ToastContainer } from './components/ToastNotification';
 import type { Toast } from './components/ToastNotification';
 import { NotificationTester } from './components/NotificationTester';
 import { SystemDashboard } from './components/SystemDashboard';
+import DatabaseViewer from './pages/DatabaseViewer';
 
-type Page = 'feed' | 'preferences' | 'profile' | 'tester' | 'dashboard';
+type Page = 'feed' | 'preferences' | 'profile' | 'tester' | 'dashboard' | 'database';
 
 function AppContent() {
   const { user } = useAuth();
@@ -29,11 +31,11 @@ function AppContent() {
   // Handle incoming notifications and show toasts for likes (1-5 count)
   useEffect(() => {
     if (notifications.length === 0) return;
-    
+
     const latestNotification = notifications[0];
-    
+
     // Show toast for LIKE with count 1-5, COMMENT always, FOLLOW 1-3
-    const shouldShowToast = 
+    const shouldShowToast =
       (latestNotification.type === 'LIKE' && (latestNotification.metadata?.aggregatedCount || 1) <= 5) ||
       (latestNotification.type === 'COMMENT') ||
       (latestNotification.type === 'COMMENT_REPLY') ||
@@ -44,11 +46,11 @@ function AppContent() {
       const toastType = latestNotification.type.toLowerCase();
       const validTypes = ['like', 'comment', 'follow', 'bell_post'];
       const mappedType = validTypes.includes(toastType) ? toastType : 'like';
-      
+
       const newToast: Toast = {
         id: latestNotification.id,
         type: mappedType as Toast['type'],
-        message: latestNotification.message,
+        message: latestNotification.message || '',
         actorName: latestNotification.actorName || 'Someone',
         actorAvatar: latestNotification.actorAvatar,
         imageUrl: latestNotification.imageUrl,
@@ -86,8 +88,8 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar 
-        onNavigate={setCurrentPage} 
+      <Navbar
+        onNavigate={setCurrentPage}
         currentPage={currentPage}
         onCreatePost={() => setShowPostCreation(true)}
         onProfileClick={() => setCurrentPage('profile')}
@@ -105,6 +107,8 @@ function AppContent() {
           <NotificationTester />
         ) : currentPage === 'dashboard' ? (
           <SystemDashboard />
+        ) : currentPage === 'database' ? (
+          <DatabaseViewer />
         ) : (
           <UserProfile userId={user.id} />
         )}
@@ -112,7 +116,7 @@ function AppContent() {
 
       {/* Post Creation Modal */}
       {showPostCreation && (
-        <PostCreation 
+        <PostCreation
           onClose={() => setShowPostCreation(false)}
           onPostCreated={() => {
             setRefreshFeed(prev => prev + 1);
@@ -128,7 +132,9 @@ function App() {
   return (
     <AuthProvider>
       <SocketProvider>
-        <AppContent />
+        <ErrorBoundary>
+          <AppContent />
+        </ErrorBoundary>
       </SocketProvider>
     </AuthProvider>
   );

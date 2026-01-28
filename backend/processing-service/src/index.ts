@@ -1,21 +1,20 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { Kafka, logLevel, Consumer, Producer } from 'kafkajs';
-import { 
-  addToAggregationWindow, 
-  flushExpiredWindows, 
-  generateAggregatedMessage 
+import {
+  addToAggregationWindow,
+  flushExpiredWindows,
+  generateAggregatedMessage
 } from './services/aggregationService';
-import { executeBatchWrite } from './services/batchWriteService';
+import { executeBatchWrite, batchWriteNotificationHistory } from './services/batchWriteService';
 import { logNotification } from './services/dynamoService';
 import { checkUserPreferences } from './services/preferenceService';
 import { NotificationEvent, NotificationPriority, KAFKA_TOPICS } from '../../shared/types';
 import { ensureTopicsExist } from './config/initTopics';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../shared/prisma/generated/client';
 
 // Make env loading deterministic even when started from a different cwd (e.g. scripts/start-all.js)
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
-
+dotenv.config({ path: path.resolve(__dirname, '../../..', '.env') });
 // Global error handlers to prevent silent crashes
 process.on('uncaughtException', (err) => {
   console.error('💀 UNCAUGHT EXCEPTION:', err);
@@ -59,19 +58,19 @@ const kafka = new Kafka({
 });
 
 // Create 3 consumer groups for priority-based processing
-const criticalConsumer = kafka.consumer({ 
+const criticalConsumer = kafka.consumer({
   groupId: 'critical-consumer',
   sessionTimeout: 30000,
   heartbeatInterval: 3000,
 });
 
-const highPriorityConsumer = kafka.consumer({ 
+const highPriorityConsumer = kafka.consumer({
   groupId: 'high-priority-consumer',
   sessionTimeout: 30000,
   heartbeatInterval: 3000,
 });
 
-const lowPriorityConsumer = kafka.consumer({ 
+const lowPriorityConsumer = kafka.consumer({
   groupId: 'low-priority-consumer',
   sessionTimeout: 30000,
   heartbeatInterval: 3000,
@@ -114,7 +113,7 @@ function safeParseEvent(rawValue: string, source: string): NotificationEvent | n
  */
 async function processNotificationEvent(event: NotificationEvent): Promise<void> {
   const startTime = Date.now();
-  
+
   console.log(`\n📥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   console.log(`📥 INCOMING: ${event.type} | Priority: ${event.priority}`);
   console.log(`📥 Target User: ${event.targetId}`);
@@ -130,9 +129,9 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
     } catch (prefError) {
       console.error(`⚠️ Preference check failed, allowing by default:`, prefError);
     }
-    
+
     if (!isPreferred) {
-      try { await logNotification(event, 'FILTERED_PREFS'); } catch {}
+      try { await logNotification(event, 'FILTERED_PREFS'); } catch { }
       console.log(`🚫 Filtered by preferences: ${event.type} for ${event.targetId}`);
       return;
     }
@@ -189,7 +188,7 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
 
     // 4. Determine delivery channels based on priority
     const channels = getChannelsForPriority(finalEvent.priority);
-    
+
     // Add channels to metadata
     finalEvent = {
       ...finalEvent,
@@ -218,37 +217,13 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
 
     // 6. Log to DynamoDB (fire and forget - non-blocking)
     logNotification(finalEvent, 'SENT');
-    
-    // 7. Save to PostgreSQL for persistence
-    console.log(`💾 Saving to PostgreSQL...`);
-    try {
-      await prisma.notificationHistory.create({
-        data: {
-          userId: finalEvent.targetId,
-          type: finalEvent.type,
-          priority: finalEvent.priority,
-          actorId: finalEvent.actorId,
-          actorName: finalEvent.actorName || 'Someone',
-          actorAvatar: finalEvent.actorAvatar,
-          isAggregated: !!finalEvent.metadata?.isAggregated,
-          aggregatedCount: finalEvent.metadata?.aggregatedCount || 1,
-          aggregatedIds: finalEvent.metadata?.aggregatedActors || [],
-          title: finalEvent.title || 'New notification',
-          message: finalEvent.message || '',
-          imageUrl: finalEvent.imageUrl,
-          targetType: finalEvent.targetType,
-          targetId: finalEvent.targetEntityId,
-          isRead: false,
-          deliveryStatus: 'SENT',
-          channels: finalEvent.metadata?.channels || [],
-        }
-      });
-      console.log(`💾 Saved to PostgreSQL: ${finalEvent.id}`);
-    } catch (dbError) {
-      console.error(`❌ PostgreSQL save error:`, dbError);
-      // Don't fail the entire operation if DB save fails
-    }
-    
+
+    // 7. BATCHING: Notification history will be written during window flush
+    // This reduces DB writes from N (every notification) to 1 (per 60s window)
+    // Notifications are still visible on frontend via WebSocket
+    console.log(`⏳ Notification queued for batch DB write (60s window)`);
+
+
     const duration = Date.now() - startTime;
     console.log(`\n✅ ════════════════════════════════════════════════`);
     console.log(`✅ DELIVERED: ${event.type} | Priority: ${finalEvent.priority}`);
@@ -259,7 +234,7 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
 
   } catch (error) {
     console.error(`❌ Error processing event:`, error);
-    try { await logNotification(event, 'FAILED'); } catch {}
+    try { await logNotification(event, 'FAILED'); } catch { }
   }
 }
 /**
@@ -270,8 +245,8 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
 async function startCriticalConsumer() {
   attachConsumerLifecycleLogs(criticalConsumer, 'critical-consumer');
   await criticalConsumer.connect();
-  await criticalConsumer.subscribe({ 
-    topic: KAFKA_TOPICS.CRITICAL, 
+  await criticalConsumer.subscribe({
+    topic: KAFKA_TOPICS.CRITICAL,
     fromBeginning: true  // Read from beginning to catch all messages
   });
 
@@ -303,9 +278,9 @@ async function startHighPriorityConsumer() {
   attachConsumerLifecycleLogs(highPriorityConsumer, 'high-priority-consumer');
   await highPriorityConsumer.connect();
   console.log('🟡 Connected! Subscribing to topic:', KAFKA_TOPICS.HIGH);
-  
-  await highPriorityConsumer.subscribe({ 
-    topic: KAFKA_TOPICS.HIGH, 
+
+  await highPriorityConsumer.subscribe({
+    topic: KAFKA_TOPICS.HIGH,
     fromBeginning: true  // Read from beginning to catch all messages
   });
   console.log('🟡 Subscribed with fromBeginning: true');
@@ -316,7 +291,7 @@ async function startHighPriorityConsumer() {
       try {
         console.log(`\n🔔 HIGH PRIORITY MESSAGE RECEIVED`);
         console.log(`   Topic: ${topic} | Partition: ${partition} | Offset: ${message.offset}`);
-        
+
         const rawValue = message.value?.toString();
         if (!rawValue) {
           console.log(`   ⚠️ Empty message`);
@@ -345,8 +320,8 @@ async function startHighPriorityConsumer() {
 async function startLowPriorityConsumer() {
   attachConsumerLifecycleLogs(lowPriorityConsumer, 'low-priority-consumer');
   await lowPriorityConsumer.connect();
-  await lowPriorityConsumer.subscribe({ 
-    topic: KAFKA_TOPICS.LOW, 
+  await lowPriorityConsumer.subscribe({
+    topic: KAFKA_TOPICS.LOW,
     fromBeginning: true  // Read from beginning to catch all messages
   });
 
@@ -377,15 +352,15 @@ function startAggregationFlushJob() {
     await flushExpiredWindows(async (aggregatedData) => {
       // 1. BATCH WRITE TO DATABASE FIRST
       const agg = aggregatedData;
-      
+
       console.log(`\n📦 ════════════════════════════════════════════════`);
       console.log(`📦 BATCH PROCESSING ${agg.count} ${agg.firstEvent.type} events`);
       console.log(`📦 ════════════════════════════════════════════════`);
-      
+
       // Execute batch database write
       const writeResult = await executeBatchWrite(agg.allEvents);
       console.log(`📦 DB Write Result: ${writeResult.written} written, ${writeResult.errors} errors`);
-      
+
       // 2. SEND AGGREGATED NOTIFICATION
       const aggregatedMessage = generateAggregatedMessage(
         agg.firstEvent.type,
@@ -395,8 +370,8 @@ function startAggregationFlushJob() {
 
       // Determine priority based on aggregation count
       let priority = agg.firstEvent.priority;
-      if ((agg.count >= 3 && agg.count <= 10) && 
-          (agg.firstEvent.type === 'LIKE' || agg.firstEvent.type === 'COMMENT')) {
+      if ((agg.count >= 3 && agg.count <= 10) &&
+        (agg.firstEvent.type === 'LIKE' || agg.firstEvent.type === 'COMMENT')) {
         priority = 'CRITICAL';
       }
 
@@ -433,33 +408,9 @@ function startAggregationFlushJob() {
         }],
       });
 
-      // Save to PostgreSQL
-      try {
-        await prisma.notificationHistory.create({
-          data: {
-            userId: finalEvent.targetId,
-            type: finalEvent.type,
-            priority: finalEvent.priority,
-            actorId: finalEvent.actorId,
-            actorName: finalEvent.actorName || 'Someone',
-            actorAvatar: finalEvent.actorAvatar,
-            isAggregated: true,
-            aggregatedCount: agg.count,
-            aggregatedIds: agg.actors,
-            title: finalEvent.title || 'New notification',
-            message: finalEvent.message || '',
-            imageUrl: finalEvent.imageUrl,
-            targetType: finalEvent.targetType,
-            targetId: finalEvent.targetEntityId,
-            isRead: false,
-            deliveryStatus: 'SENT',
-            channels: finalEvent.metadata?.channels || [],
-          }
-        });
-        console.log(`💾 Aggregated notification saved to PostgreSQL`);
-      } catch (dbError) {
-        console.error(`❌ PostgreSQL save error:`, dbError);
-      }
+      // 3. BATCH WRITE NOTIFICATION HISTORY
+      // Write aggregated notification to notification history table
+      await batchWriteNotificationHistory(finalEvent);
 
       console.log(`\n✅ ════════════════════════════════════════════════`);
       console.log(`✅ AGGREGATED DELIVERED: ${agg.count} ${agg.firstEvent.type}s`);
@@ -467,9 +418,9 @@ function startAggregationFlushJob() {
       console.log(`✅ Message: ${aggregatedMessage}`);
       console.log(`✅ ════════════════════════════════════════════════\n`);
     });
-  }, 30000); // 30 seconds
+  }, 60000); // 60 seconds - checks for windows that expired 2 minutes ago
 
-  console.log('⏰ Aggregation flush job started (30s interval)');
+  console.log('⏰ Aggregation flush job started (60s interval, 2min windows)');
 }
 
 /**
@@ -493,13 +444,13 @@ async function startService() {
     // Start all consumers SEQUENTIALLY with error handling
     // (Promise.all can hide async errors from consumer.run())
     console.log('\n🚦 Starting consumers sequentially...');
-    
+
     try {
       await startCriticalConsumer();
     } catch (err) {
       console.error('❌ Critical consumer failed to start:', err);
     }
-    
+
     try {
       await startHighPriorityConsumer();
     } catch (err) {
@@ -507,7 +458,7 @@ async function startService() {
       // This is critical - exit so nodemon restarts
       throw err;
     }
-    
+
     try {
       await startLowPriorityConsumer();
     } catch (err) {
@@ -521,7 +472,7 @@ async function startService() {
     console.log('   - Critical (P0): OTPs, Security');
     console.log('   - High (P1): Social interactions');
     console.log('   - Low (P2): Marketing, Digests');
-    
+
     // Heartbeat to confirm service is alive
     setInterval(() => {
       console.log(`💓 Heartbeat: ${new Date().toISOString()} - Consumers should be running`);

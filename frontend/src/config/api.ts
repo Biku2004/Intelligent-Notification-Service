@@ -7,10 +7,10 @@
 export const SOCIAL_API_URL = import.meta.env.VITE_SOCIAL_API_URL || 'http://localhost:3003';
 
 // Notification API - Notification history and preferences
-export const NOTIFICATION_API_URL = import.meta.env.VITE_NOTIFICATION_API_URL || 'http://localhost:3002';
+export const NOTIFICATION_API_URL = import.meta.env.VITE_NOTIFICATION_API_URL || 'http://localhost:3001';
 
 // Ingestion API - Event ingestion for testing
-export const INGESTION_API_URL = import.meta.env.VITE_INGESTION_API_URL || 'http://localhost:3001';
+export const INGESTION_API_URL = import.meta.env.VITE_INGESTION_API_URL || 'http://localhost:3000';
 
 // Socket API - Real-time WebSocket notifications
 export const SOCKET_API_URL = import.meta.env.VITE_SOCKET_API_URL || 'http://localhost:4000';

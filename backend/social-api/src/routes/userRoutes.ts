@@ -5,7 +5,7 @@
  * /api/users/search - Search users by username
  */
 import express, { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { authMiddleware, optionalAuthMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
@@ -167,10 +167,10 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 
     res.json({
       success: true,
-      users: users.map(u => ({
-        ...u,
-        followersCount: u._count.followers,
-      }))
+      users: users.map((u: any) => ({
+          ...u,
+          followersCount: u._count.followers,
+        }))
     });
   } catch (error: any) {
     console.error('❌ Search users error:', error);

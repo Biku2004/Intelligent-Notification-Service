@@ -13,7 +13,10 @@ const colors = {
   cyan: '\x1b[36m'
 };
 
-// Services with Prisma schemas
+// Shared schema path (single source of truth)
+const SHARED_SCHEMA_PATH = 'backend/shared/prisma/schema.prisma';
+
+// Services that use Prisma
 const prismaServices = [
   { name: 'ingestion-service', path: 'backend/ingestion-service' },
   { name: 'notification-api', path: 'backend/notification-api' },
@@ -27,8 +30,8 @@ function log(message, color = colors.reset) {
 
 function execCommand(command, cwd) {
   try {
-    execSync(command, { 
-      cwd, 
+    execSync(command, {
+      cwd,
       stdio: 'inherit',
       shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'
     });
@@ -41,55 +44,65 @@ function execCommand(command, cwd) {
 
 function setupPrisma(mode = 'all') {
   const rootDir = path.join(__dirname, '..');
-  
+  const sharedSchemaPath = path.join(rootDir, SHARED_SCHEMA_PATH);
+
   log('\n========================================', colors.cyan);
-  log('🔧 Prisma Setup Script', colors.bright + colors.cyan);
+  log('🔧 Prisma Setup Script (Shared Schema)', colors.bright + colors.cyan);
   log('========================================\n', colors.cyan);
 
-  prismaServices.forEach((service, index) => {
+  // Check if shared schema exists
+  if (!fs.existsSync(sharedSchemaPath)) {
+    log(`❌ Shared schema not found at: ${sharedSchemaPath}`, colors.red);
+    log('Please ensure the shared schema exists at backend/shared/prisma/schema.prisma', colors.yellow);
+    process.exit(1);
+  }
+
+  log(`📄 Using shared schema: ${SHARED_SCHEMA_PATH}`, colors.cyan);
+  log('─'.repeat(50) + '\n', colors.cyan);
+
+  // Generate Prisma Client from shared schema (once)
+  if (mode === 'all' || mode === 'generate') {
+    log('📦 Generating Prisma Client from shared schema...', colors.yellow);
+    const success = execCommand(`npx prisma generate --schema=${SHARED_SCHEMA_PATH}`, rootDir);
+    if (success) {
+      log('✅ Prisma Client generated successfully!\n', colors.green);
+    } else {
+      log('❌ Failed to generate Prisma Client', colors.red);
+      process.exit(1);
+    }
+  }
+
+  // Run migrations (only from shared schema)
+  if (mode === 'all' || mode === 'migrate') {
+    log('🔄 Running migrations from shared schema...', colors.yellow);
+    const migrateCommand = process.env.NODE_ENV === 'production'
+      ? `npx prisma migrate deploy --schema=${SHARED_SCHEMA_PATH}`
+      : `npx prisma migrate dev --schema=${SHARED_SCHEMA_PATH}`;
+
+    const success = execCommand(migrateCommand, rootDir);
+    if (success) {
+      log('✅ Migrations completed successfully!\n', colors.green);
+    } else {
+      log('❌ Failed to run migrations', colors.red);
+    }
+  }
+
+  // Validate that all services can access the generated client
+  log('\n📋 Validating services...', colors.blue);
+  prismaServices.forEach((service) => {
     const servicePath = path.join(rootDir, service.path);
-    const schemaPath = path.join(servicePath, 'prisma', 'schema.prisma');
-    
-    // Check if schema exists
-    if (!fs.existsSync(schemaPath)) {
-      log(`⚠️  Schema not found for ${service.name}, skipping...`, colors.yellow);
-      return;
-    }
-
-    log(`\n[${index + 1}/${prismaServices.length}] Processing: ${service.name}`, colors.blue + colors.bright);
-    log('─'.repeat(50), colors.blue);
-
-    // Generate Prisma Client
-    if (mode === 'all' || mode === 'generate') {
-      log(`📦 Generating Prisma Client...`, colors.yellow);
-      const success = execCommand('npx prisma generate', servicePath);
-      if (success) {
-        log(`✅ Prisma Client generated successfully!`, colors.green);
-      } else {
-        log(`❌ Failed to generate Prisma Client`, colors.red);
-      }
-    }
-
-    // Run migrations (only in migrate mode or all mode)
-    if (mode === 'all' || mode === 'migrate') {
-      log(`🔄 Running migrations...`, colors.yellow);
-      // Use migrate deploy for production-like setup or migrate dev for development
-      const migrateCommand = process.env.NODE_ENV === 'production' 
-        ? 'npx prisma migrate deploy' 
-        : 'npx prisma migrate dev';
-      
-      const success = execCommand(migrateCommand, servicePath);
-      if (success) {
-        log(`✅ Migrations completed successfully!`, colors.green);
-      } else {
-        log(`❌ Failed to run migrations`, colors.red);
-      }
+    if (fs.existsSync(servicePath)) {
+      log(`  ✓ ${service.name}`, colors.green);
+    } else {
+      log(`  ⚠ ${service.name} not found`, colors.yellow);
     }
   });
 
   log('\n========================================', colors.cyan);
   log('✨ Prisma Setup Completed!', colors.bright + colors.green);
-  log('========================================\n', colors.cyan);
+  log('========================================', colors.cyan);
+  log('\nℹ️  All services now use the shared Prisma Client', colors.blue);
+  log('   from: backend/shared/prisma/generated/client\n', colors.blue);
 }
 
 // Get command line argument

@@ -5,7 +5,7 @@
  * WARNING: Only use in development/testing environments!
  */
 import { Router, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import { sendNotificationEvent } from '../utils/kafka';
@@ -27,15 +27,16 @@ const testUserNames = [
  * POST /api/test/simulate-likes
  * Simulates multiple users liking a post
  * Creates real test users (if needed) and real likes in the database
+ * Supports follower-based simulation for smart notification testing
  */
 router.post('/simulate-likes', async (req, res: Response) => {
   try {
-    const { postId, count = 5, targetUserId, persist = true } = req.body;
+    const { postId, count = 5, targetUserId, simulationType = 'mixed' } = req.body;
 
     if (!postId || !targetUserId) {
-      res.status(400).json({ 
-        success: false, 
-        error: 'postId and targetUserId are required' 
+      res.status(400).json({
+        success: false,
+        error: 'postId and targetUserId are required'
       });
       return;
     }
@@ -51,13 +52,24 @@ router.post('/simulate-likes', async (req, res: Response) => {
       return;
     }
 
-    const results: { userId: string; username: string; success: boolean }[] = [];
+    const results: { userId: string; username: string; success: boolean; isFollower: boolean }[] = [];
     const timestamp = Date.now();
 
     for (let i = 0; i < Math.min(count, 50); i++) {
       const testUsername = `test_${testUserNames[i % testUserNames.length].toLowerCase()}_${timestamp}_${i}`;
       const testEmail = `${testUsername}@test.local`;
       const testName = `${testUserNames[i % testUserNames.length]} (Test)`;
+
+      // Determine if this user is a "follower" based on simulationType
+      let isFollower = false;
+      if (simulationType === 'followers') {
+        isFollower = true;
+      } else if (simulationType === 'non-followers') {
+        isFollower = false;
+      } else {
+        // Mixed: alternate between followers and non-followers
+        isFollower = i % 2 === 0;
+      }
 
       try {
         // Create test user
@@ -73,11 +85,22 @@ router.post('/simulate-likes', async (req, res: Response) => {
           }
         });
 
-        // DO NOT create the like in database here
-        // Processing-service will batch-write after ~60s window expires
-        // This reduces DB load: 1 batch write instead of N individual writes
-        
-        // Always send notification through Kafka (processed by batch)
+        // If simulating followers, create a follow relationship
+        if (isFollower) {
+          await prisma.follow.create({
+            data: {
+              followerId: testUser.id,
+              followingId: targetUserId
+            }
+          }).catch(() => {
+            // Ignore if follow already exists
+          });
+        }
+
+        // BATCHING: Don't write to DB immediately - let processing-service batch it
+        // The like will be written to DB after 2-minute aggregation window
+
+        // Send notification through Kafka with follower info
         await sendNotificationEvent({
           id: uuidv4(),
           type: 'LIKE',
@@ -95,33 +118,43 @@ router.post('/simulate-likes', async (req, res: Response) => {
           metadata: {
             postUrl: `/posts/${postId}`,
             isTestUser: true,
+            isFromFollowedUser: isFollower, // Key flag for smart aggregation
+            simulationType: simulationType as string,
           }
         });
 
-        results.push({ userId: testUser.id, username: testUsername, success: true });
-        
-        // NO DELAY - send all events instantly so they aggregate in same window
-        // await new Promise(resolve => setTimeout(resolve, 100));
-        
+        results.push({ userId: testUser.id, username: testUsername, success: true, isFollower });
+
       } catch (error: any) {
         console.error(`Error creating test like ${i}:`, error.message);
-        results.push({ userId: '', username: testUsername, success: false });
+        results.push({ userId: '', username: testUsername, success: false, isFollower });
       }
     }
 
     const successCount = results.filter(r => r.success).length;
-    
+    const followerCount = results.filter(r => r.isFollower && r.success).length;
+
+    // Determine expected delivery behavior
+    const deliveryType = count <= 3 ? 'INSTANT' : 'BATCHED (~60s)';
+
     console.log(`\n🧪 ════════════════════════════════════════════════`);
     console.log(`🧪 TEST: Simulated ${successCount}/${count} likes`);
     console.log(`🧪 Post: ${postId}`);
     console.log(`🧪 Target User: ${targetUserId}`);
-    console.log(`🧪 ⏳ DB writes batched - will write after ~60s`);
+    console.log(`🧪 Followers: ${followerCount} | Non-followers: ${successCount - followerCount}`);
+    console.log(`🧪 Expected Delivery: ${deliveryType}`);
     console.log(`🧪 ════════════════════════════════════════════════\n`);
 
     res.json({
       success: true,
-      message: `Created ${successCount} test likes (DB writes batched for ~60s)`,
+      message: `Created ${successCount} test likes (${deliveryType})`,
+      deliveryType,
       results,
+      stats: {
+        total: successCount,
+        followers: followerCount,
+        nonFollowers: successCount - followerCount
+      }
     });
 
   } catch (error: any) {
@@ -129,6 +162,7 @@ router.post('/simulate-likes', async (req, res: Response) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
 
 /**
  * POST /api/test/simulate-comments
@@ -139,9 +173,9 @@ router.post('/simulate-comments', async (req, res: Response) => {
     const { postId, count = 5, targetUserId } = req.body;
 
     if (!postId || !targetUserId) {
-      res.status(400).json({ 
-        success: false, 
-        error: 'postId and targetUserId are required' 
+      res.status(400).json({
+        success: false,
+        error: 'postId and targetUserId are required'
       });
       return;
     }
@@ -184,14 +218,8 @@ router.post('/simulate-comments', async (req, res: Response) => {
           }
         });
 
-        // Create the comment in database
-        const comment = await prisma.comment.create({
-          data: {
-            postId,
-            userId: testUser.id,
-            content: commentTexts[i % commentTexts.length]
-          }
-        });
+        // BATCHING: Don't write to DB immediately - let processing-service batch it
+        const commentId = uuidv4(); // Generate ID for metadata
 
         // Send notification through Kafka
         await sendNotificationEvent({
@@ -210,14 +238,14 @@ router.post('/simulate-comments', async (req, res: Response) => {
           timestamp: new Date().toISOString(),
           metadata: {
             postUrl: `/posts/${postId}`,
-            commentId: comment.id,
+            commentId: commentId,
             isTestUser: true,
           }
         });
 
         results.push({ userId: testUser.id, username: testUsername, success: true });
         await new Promise(resolve => setTimeout(resolve, 100));
-        
+
       } catch (error: any) {
         console.error(`Error creating test comment ${i}:`, error.message);
         results.push({ userId: '', username: testUsername, success: false });
@@ -225,7 +253,7 @@ router.post('/simulate-comments', async (req, res: Response) => {
     }
 
     const successCount = results.filter(r => r.success).length;
-    
+
     console.log(`\n🧪 ════════════════════════════════════════════════`);
     console.log(`🧪 TEST: Simulated ${successCount}/${count} comments`);
     console.log(`🧪 Post: ${postId}`);
@@ -253,9 +281,9 @@ router.post('/simulate-follows', async (req, res: Response) => {
     const { targetUserId, count = 5 } = req.body;
 
     if (!targetUserId) {
-      res.status(400).json({ 
-        success: false, 
-        error: 'targetUserId is required' 
+      res.status(400).json({
+        success: false,
+        error: 'targetUserId is required'
       });
       return;
     }
@@ -291,13 +319,7 @@ router.post('/simulate-follows', async (req, res: Response) => {
           }
         });
 
-        // Create the follow in database
-        await prisma.follow.create({
-          data: {
-            followerId: testUser.id,
-            followingId: targetUserId
-          }
-        });
+        // BATCHING: Don't write to DB immediately - let processing-service batch it
 
         // Send notification through Kafka
         await sendNotificationEvent({
@@ -320,7 +342,7 @@ router.post('/simulate-follows', async (req, res: Response) => {
 
         results.push({ userId: testUser.id, username: testUsername, success: true });
         await new Promise(resolve => setTimeout(resolve, 100));
-        
+
       } catch (error: any) {
         console.error(`Error creating test follow ${i}:`, error.message);
         results.push({ userId: '', username: testUsername, success: false });
@@ -328,7 +350,7 @@ router.post('/simulate-follows', async (req, res: Response) => {
     }
 
     const successCount = results.filter(r => r.success).length;
-    
+
     console.log(`\n🧪 ════════════════════════════════════════════════`);
     console.log(`🧪 TEST: Simulated ${successCount}/${count} follows`);
     console.log(`🧪 Target User: ${targetUserId}`);
