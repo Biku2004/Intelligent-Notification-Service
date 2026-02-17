@@ -375,6 +375,7 @@ export function generateAggregatedMessage(
     SECURITY_ALERT: () => 'Security alert',
     MARKETING: () => 'Marketing notification',
     DIGEST: () => 'Daily digest',
+    POST_UPDATED: () => 'Post updated', // Internal event, rarely displayed directly
   };
 
   const template = templates[type];

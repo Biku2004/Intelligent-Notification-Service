@@ -2,7 +2,7 @@
 
 export type NotificationPriority = 'CRITICAL' | 'HIGH' | 'LOW';
 
-export type NotificationType = 
+export type NotificationType =
   | 'LIKE'
   | 'COMMENT'
   | 'COMMENT_REPLY'
@@ -15,30 +15,31 @@ export type NotificationType =
   | 'PASSWORD_RESET' // Critical
   | 'SECURITY_ALERT' // Critical
   | 'MARKETING' // Low priority
-  | 'DIGEST'; // Low priority
+  | 'DIGEST' // Low priority
+  | 'POST_UPDATED'; // Real-time feed update
 
 export interface NotificationEvent {
   id: string;
   type: NotificationType;
   priority: NotificationPriority;
-  
+
   // Actor (who triggered this notification)
   actorId: string;
   actorName?: string;
   actorAvatar?: string;
-  
+
   // Target (who receives this notification)
   targetId: string;
-  
+
   // Context
   targetType?: 'POST' | 'COMMENT' | 'USER' | 'STORY';
   targetEntityId?: string; // postId, commentId, etc.
-  
+
   // Content
   title?: string;
   message?: string;
   imageUrl?: string;
-  
+
   // Metadata
   timestamp: string;
   metadata?: Record<string, any>;
@@ -115,7 +116,7 @@ export function getPriorityForType(type: NotificationType): NotificationPriority
     case 'PASSWORD_RESET':
     case 'SECURITY_ALERT':
       return 'CRITICAL';
-    
+
     case 'LIKE':
     case 'COMMENT':
     case 'COMMENT_REPLY':
@@ -125,11 +126,12 @@ export function getPriorityForType(type: NotificationType): NotificationPriority
     case 'POST_SHARE':
     case 'STORY_VIEW':
       return 'HIGH';
-    
+
     case 'MARKETING':
     case 'DIGEST':
+    case 'POST_UPDATED':
       return 'LOW';
-    
+
     default:
       return 'HIGH';
   }

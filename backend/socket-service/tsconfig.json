@@ -1,14 +1,18 @@
 {
   "compilerOptions": {
-    "target": "ES2020",                       /* Modern JS output */
-    "module": "commonjs",                     /* Standard Node.js modules */
-    "rootDir": "./src",                       /* Where your TS files live */
-    "outDir": "./dist",                       /* Where JS files will be built */
-    "strict": true,                           /* Enable strict type checking */
-    "esModuleInterop": true,                  /* Allow importing CommonJS modules cleanly */
-    "skipLibCheck": true,                     /* Skip checking node_modules types */
-    "forceConsistentCasingInFileNames": true  /* Prevent file casing issues */
+    "target": "ES2020", /* Modern JS output */
+    "module": "commonjs", /* Standard Node.js modules */
+    "outDir": "./dist", /* Where JS files will be built */
+    "strict": true, /* Enable strict type checking */
+    "esModuleInterop": true, /* Allow importing CommonJS modules cleanly */
+    "skipLibCheck": true, /* Skip checking node_modules types */
+    "forceConsistentCasingInFileNames": true /* Prevent file casing issues */
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules"]
+  "include": [
+    "src/**/*",
+    "../../shared/**/*"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

@@ -4,12 +4,11 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Calendar, Settings as SettingsIcon } from 'lucide-react';
+import { Calendar, Settings as SettingsIcon, Save, X } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { BellToggle } from './BellToggle';
 import type { User, Post } from '../types';
-
-const API_BASE = 'http://localhost:3003';
+import { SOCIAL_API_URL } from '../config/api';
 
 interface UserProfileProps {
   userId: string;
@@ -26,21 +25,28 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
 
   const isOwnProfile = currentUser?.id === userId;
 
+  // Edit profile state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   const fetchUserData = useCallback(async () => {
     try {
       setLoading(true);
-      
+
       const token = localStorage.getItem('authToken');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      
+
       // Fetch user profile with auth to get bellEnabled status
-      const userResponse = await axios.get(`${API_BASE}/api/users/${userId}`, { headers });
+      const userResponse = await axios.get(`${SOCIAL_API_URL}/api/users/${userId}`, { headers });
       if (userResponse.data.success) {
         setUser(userResponse.data.user);
       }
 
       // Fetch user's posts
-      const postsResponse = await axios.get(`${API_BASE}/api/posts`, {
+      const postsResponse = await axios.get(`${SOCIAL_API_URL}/api/posts`, {
         params: { userId, limit: 12 }
       });
       if (postsResponse.data.success) {
@@ -56,7 +62,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
 
   const fetchFollowers = useCallback(async () => {
     try {
-      const response = await axios.get(`${API_BASE}/api/follows/${userId}/followers`);
+      const response = await axios.get(`${SOCIAL_API_URL}/api/follows/${userId}/followers`);
       if (response.data.success) {
         setFollowers(response.data.followers);
       }
@@ -67,7 +73,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
 
   const fetchFollowing = useCallback(async () => {
     try {
-      const response = await axios.get(`${API_BASE}/api/follows/${userId}/following`);
+      const response = await axios.get(`${SOCIAL_API_URL}/api/follows/${userId}/following`);
       if (response.data.success) {
         setFollowing(response.data.following);
       }
@@ -90,11 +96,11 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
 
   const handleFollow = async () => {
     if (!currentUser) return;
-    
+
     try {
       const token = localStorage.getItem('authToken');
       const response = await axios.post(
-        `${API_BASE}/api/follows/${userId}`,
+        `${SOCIAL_API_URL}/api/follows/${userId}`,
         {},
         {
           headers: {
@@ -119,6 +125,44 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
     setUser(prev => prev ? { ...prev, bellEnabled: newState } : null);
   };
 
+  /** Open edit form pre-filled with current values */
+  const startEditing = () => {
+    if (user) {
+      setEditName(user.name || '');
+      setEditBio(user.bio || '');
+      setEditError(null);
+      setIsEditing(true);
+    }
+  };
+
+  /** Save profile edits via PATCH API */
+  const handleSaveProfile = async () => {
+    const token = localStorage.getItem('authToken');
+    if (!token || !user) return;
+
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const response = await axios.patch(
+        `${SOCIAL_API_URL}/api/users/${userId}`,
+        { name: editName.trim(), bio: editBio.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.data.success) {
+        setUser(prev => prev ? {
+          ...prev,
+          name: editName.trim(),
+          bio: editBio.trim()
+        } : null);
+        setIsEditing(false);
+      }
+    } catch (err: any) {
+      setEditError(err.response?.data?.error || 'Failed to save profile');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -139,7 +183,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
     <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
       {/* Header with background gradient */}
       <div className="h-32 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-600"></div>
-      
+
       {/* Profile Info */}
       <div className="px-6 pb-6">
         {/* Avatar */}
@@ -156,6 +200,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
           <div className="flex gap-2 mt-20">
             {isOwnProfile ? (
               <button
+                onClick={startEditing}
                 className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition flex items-center gap-2"
               >
                 <SettingsIcon size={18} />
@@ -165,18 +210,17 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
               <>
                 <button
                   onClick={handleFollow}
-                  className={`px-6 py-2 rounded-lg font-semibold transition ${
-                    user.isFollowing
-                      ? 'bg-gray-200 hover:bg-gray-300 text-gray-900'
-                      : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white'
-                  }`}
+                  className={`px-6 py-2 rounded-lg font-semibold transition ${user.isFollowing
+                    ? 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                    : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white'
+                    }`}
                 >
                   {user.isFollowing ? 'Following' : 'Follow'}
                 </button>
-                
+
                 <BellToggle
                   userId={userId}
-                  isFollowing={user.isFollowing}
+                  isFollowing={user.isFollowing ?? false}
                   bellEnabled={user.bellEnabled || false}
                   onToggle={handleBellToggle}
                   size="medium"
@@ -187,19 +231,77 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
           </div>
         </div>
 
-        {/* User Info */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">{user.name || user.username}</h1>
-          <p className="text-gray-500">@{user.username}</p>
-          {user.bio && <p className="mt-3 text-gray-700">{user.bio}</p>}
-          
-          <div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
-            <div className="flex items-center gap-1">
-              <Calendar size={16} />
-              <span>Joined {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span>
+        {/* User Info / Edit Form */}
+        {isEditing ? (
+          <div className="mb-6 bg-gray-50 rounded-xl p-4 border border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">Edit Profile</h3>
+
+            {editError && (
+              <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                {editError}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="Your display name"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none text-gray-900"
+                  maxLength={50}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
+                <textarea
+                  value={editBio}
+                  onChange={(e) => setEditBio(e.target.value)}
+                  placeholder="Tell us about yourself..."
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none resize-none text-gray-900"
+                  rows={3}
+                  maxLength={160}
+                />
+                <p className="text-xs text-gray-400 mt-1 text-right">{editBio.length}/160</p>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition flex items-center gap-1"
+                  disabled={editSaving}
+                >
+                  <X size={16} /> Cancel
+                </button>
+                <button
+                  onClick={handleSaveProfile}
+                  disabled={editSaving}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition flex items-center gap-1 disabled:opacity-50"
+                >
+                  {editSaving ? (
+                    <><div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> Saving...</>
+                  ) : (
+                    <><Save size={16} /> Save</>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="mb-6">
+            <h1 className="text-2xl font-bold text-gray-900">{user.name || user.username}</h1>
+            <p className="text-gray-500">@{user.username}</p>
+            {user.bio && <p className="mt-3 text-gray-700">{user.bio}</p>}
+
+            <div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
+              <div className="flex items-center gap-1">
+                <Calendar size={16} />
+                <span>Joined {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Stats */}
         <div className="flex gap-6 mb-6 pb-6 border-b border-gray-200">
@@ -227,31 +329,28 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId }) => {
         <div className="flex gap-4 mb-6 border-b border-gray-200">
           <button
             onClick={() => setActiveTab('posts')}
-            className={`px-4 py-2 font-medium transition ${
-              activeTab === 'posts'
-                ? 'text-purple-600 border-b-2 border-purple-600'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
+            className={`px-4 py-2 font-medium transition ${activeTab === 'posts'
+              ? 'text-purple-600 border-b-2 border-purple-600'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
           >
             Posts
           </button>
           <button
             onClick={() => setActiveTab('followers')}
-            className={`px-4 py-2 font-medium transition ${
-              activeTab === 'followers'
-                ? 'text-purple-600 border-b-2 border-purple-600'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
+            className={`px-4 py-2 font-medium transition ${activeTab === 'followers'
+              ? 'text-purple-600 border-b-2 border-purple-600'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
           >
             Followers
           </button>
           <button
             onClick={() => setActiveTab('following')}
-            className={`px-4 py-2 font-medium transition ${
-              activeTab === 'following'
-                ? 'text-purple-600 border-b-2 border-purple-600'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
+            className={`px-4 py-2 font-medium transition ${activeTab === 'following'
+              ? 'text-purple-600 border-b-2 border-purple-600'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
           >
             Following
           </button>

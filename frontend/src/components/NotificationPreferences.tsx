@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bell, Mail, MessageSquare, Clock, Save } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { SOCIAL_API_URL } from '../config/api';
+import axios from 'axios';
 import type { UserPreferences } from '../types';
 
 /**
@@ -10,30 +13,63 @@ import type { UserPreferences } from '../types';
  * - Notification categories (Activity, Social, Marketing)
  * - Do Not Disturb schedule
  * 
- * This component manages all user preference states locally and
- * persists them via API call on save.
+ * Loads preferences from backend on mount and persists changes via API.
  */
 export const NotificationPreferences: React.FC = () => {
+  const { user } = useAuth();
+
   // Initialize preferences with default values
-  // These would typically be fetched from the backend API on mount
   const [preferences, setPreferences] = useState<UserPreferences>({
-    emailEnabled: true,      // Email notifications enabled by default
-    smsEnabled: false,       // SMS disabled (cost consideration)
-    pushEnabled: true,       // Browser push notifications enabled
-    marketing: false,        // Marketing emails disabled by default
-    activity: true,          // Activity notifications (likes, comments) enabled
-    social: true,            // Social notifications (follows, shares) enabled
-    dndEnabled: false,       // Do Not Disturb disabled by default
-    dndStartTime: '22:00',   // DND start time (10 PM)
-    dndEndTime: '08:00',     // DND end time (8 AM)
+    emailEnabled: true,
+    smsEnabled: false,
+    pushEnabled: true,
+    marketing: false,
+    activity: true,
+    social: true,
+    dndEnabled: false,
+    dndStartTime: '22:00',
+    dndEndTime: '08:00',
   });
 
-  // Track save confirmation message visibility
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch preferences from backend on mount
+  useEffect(() => {
+    const fetchPreferences = async () => {
+      if (!user?.id) return;
+      try {
+        setLoading(true);
+        const response = await axios.get(`${SOCIAL_API_URL}/api/preferences/${user.id}`);
+        if (response.data.success && response.data.preferences) {
+          const p = response.data.preferences;
+          setPreferences({
+            emailEnabled: p.emailEnabled ?? true,
+            smsEnabled: p.smsEnabled ?? false,
+            pushEnabled: p.pushEnabled ?? true,
+            marketing: p.marketing ?? false,
+            activity: p.activity ?? true,
+            social: p.social ?? true,
+            dndEnabled: p.dndEnabled ?? false,
+            dndStartTime: p.dndStartTime ?? '22:00',
+            dndEndTime: p.dndEndTime ?? '08:00',
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load preferences:', err);
+        // Use defaults on error
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPreferences();
+  }, [user?.id]);
 
   /**
    * Toggle boolean preference values
-   * @param key - The preference key to toggle
    */
   const handleToggle = (key: keyof UserPreferences) => {
     setPreferences(prev => ({
@@ -44,8 +80,6 @@ export const NotificationPreferences: React.FC = () => {
 
   /**
    * Update DND time values
-   * @param key - Either 'dndStartTime' or 'dndEndTime'
-   * @param value - Time string in HH:mm format (e.g., "22:00")
    */
   const handleTimeChange = (key: 'dndStartTime' | 'dndEndTime', value: string) => {
     setPreferences(prev => ({
@@ -55,21 +89,23 @@ export const NotificationPreferences: React.FC = () => {
   };
 
   /**
-   * Save preferences to backend
-   * TODO: Replace with actual API call to /api/preferences/:userId
-   * Should send PUT request with preferences object
+   * Save preferences to backend via PATCH /api/preferences/:userId
    */
   const handleSave = async () => {
-    // Example API call structure:
-    // await axios.put(`/api/preferences/${userId}`, preferences);
-
-    console.log('Saving preferences:', preferences);
-
-    // Show success message
-    setSaved(true);
-
-    // Hide success message after 3 seconds
-    setTimeout(() => setSaved(false), 3000);
+    if (!user?.id) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await axios.patch(`${SOCIAL_API_URL}/api/preferences/${user.id}`, preferences);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      console.error('Failed to save preferences:', err);
+      setError('Failed to save preferences. Please try again.');
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -182,8 +218,8 @@ export const NotificationPreferences: React.FC = () => {
                   <span className="text-sm text-gray-500">{item.desc}</span>
                 </div>
                 <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors ${preferences[item.key as keyof UserPreferences]
-                    ? 'bg-purple-600 border-purple-600'
-                    : 'border-gray-300 group-hover:border-purple-400'
+                  ? 'bg-purple-600 border-purple-600'
+                  : 'border-gray-300 group-hover:border-purple-400'
                   }`}>
                   {preferences[item.key as keyof UserPreferences] && (
                     <Save size={14} className="text-white" /> // Checkmark icon replacement
@@ -247,17 +283,32 @@ export const NotificationPreferences: React.FC = () => {
           </div>
         </div>
 
+        {/* Error Banner */}
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+            {error}
+          </div>
+        )}
+
         {/* Save Button */}
         <button
           onClick={handleSave}
+          disabled={saving || loading}
           className={`w-full group relative flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-all duration-300 shadow-lg ${saved
-              ? 'bg-green-500 text-white shadow-green-200'
+            ? 'bg-green-500 text-white shadow-green-200'
+            : saving || loading
+              ? 'bg-gray-400 text-white cursor-not-allowed'
               : 'bg-gray-900 text-white hover:bg-gray-800 hover:shadow-xl hover:-translate-y-0.5'
             }`}
         >
           {saved ? (
             <>
               <span className="animate-bounce">✓</span> Preferences Saved
+            </>
+          ) : saving ? (
+            <>
+              <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
+              Saving...
             </>
           ) : (
             <>

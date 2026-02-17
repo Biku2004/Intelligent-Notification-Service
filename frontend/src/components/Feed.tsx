@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Heart, MessageCircle, Share2, Bookmark, UserPlus, UserCheck, Send, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Heart, MessageCircle, Share2, Bookmark, BookmarkCheck, UserPlus, UserCheck, Send, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import axios from 'axios';
 import { SOCIAL_API_URL } from '../config/api';
 import { useAuth } from '../hooks/useAuth';
+import { useAppMode } from '../context/AppModeContext';
 import { PostTester } from './PostTester';
 import { UserProfile } from './UserProfile';
+import { useSocket } from '../hooks/useSocket';
 
 interface Comment {
   id: string;
@@ -40,15 +42,32 @@ interface Post {
   likes?: Array<{ userId: string }>;
 }
 
-export const Feed: React.FC = () => {
+interface FeedProps {
+  highlightPostId?: string | null;
+}
+
+export const Feed: React.FC<FeedProps> = ({ highlightPostId }) => {
   const { user } = useAuth();
+  const { isTesting } = useAppMode();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [followedUsers, setFollowedUsers] = useState<Set<string>>(new Set());
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  
+
+  // Bookmark state
+  const [bookmarkedPosts, setBookmarkedPosts] = useState<Set<string>>(new Set());
+
+  // Share tooltip state
+  const [shareTooltip, setShareTooltip] = useState<string | null>(null);
+
+  // Like-in-progress lock (prevents double-click race condition)
+  const [likingInProgress, setLikingInProgress] = useState<Set<string>>(new Set());
+
+  // Deep-link scroll ref
+  const postRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
   // Comments state
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
   const [postComments, setPostComments] = useState<Record<string, Comment[]>>({});
@@ -65,10 +84,10 @@ export const Feed: React.FC = () => {
           Authorization: `Bearer ${token}`
         }
       });
-      
+
       const fetchedPosts = response.data.posts || [];
       setPosts(fetchedPosts);
-      
+
       // Track which posts are liked by current user using isLiked from backend
       const liked = new Set<string>();
       fetchedPosts.forEach((post: Post) => {
@@ -77,12 +96,12 @@ export const Feed: React.FC = () => {
         }
       });
       setLikedPosts(liked);
-      
+
       // Fetch follow status for all post authors
       if (token && user) {
-        const uniqueUserIds = Array.from(new Set(fetchedPosts.map((p: Post) => p.userId)));
+        const uniqueUserIds = Array.from(new Set(fetchedPosts.map((p: Post) => p.userId))) as string[];
         const followStatuses = await Promise.all(
-          uniqueUserIds.map(async (userId) => {
+          uniqueUserIds.map(async (userId: string) => {
             try {
               const followRes = await axios.get(`${SOCIAL_API_URL}/api/users/${userId}`, {
                 headers: { Authorization: `Bearer ${token}` }
@@ -93,7 +112,7 @@ export const Feed: React.FC = () => {
             }
           })
         );
-        
+
         const followed = new Set<string>();
         followStatuses.forEach(({ userId, isFollowing }) => {
           if (isFollowing) followed.add(userId);
@@ -108,18 +127,154 @@ export const Feed: React.FC = () => {
     }
   };
 
+  // Fetch bookmarks status on mount
+  const fetchBookmarks = async (postIds: string[]) => {
+    const token = localStorage.getItem('authToken');
+    if (!token || postIds.length === 0) return;
+    try {
+      const response = await axios.get(
+        `${SOCIAL_API_URL}/api/bookmarks/check?postIds=${postIds.join(',')}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.data.bookmarkedPostIds) {
+        setBookmarkedPosts(new Set(response.data.bookmarkedPostIds));
+      }
+    } catch {
+      // Silently fail — bookmarks are non-critical
+    }
+  };
+
   useEffect(() => {
-    fetchPosts();
+    fetchPosts().then(() => {
+      // Fetch bookmark status after posts are loaded
+    });
   }, []);
 
+  // Fetch bookmarks whenever posts change
+  useEffect(() => {
+    if (posts.length > 0) {
+      fetchBookmarks(posts.map(p => p.id));
+    }
+  }, [posts.length]);
+
+  // Scroll to highlighted post (deep link)
+  useEffect(() => {
+    if (highlightPostId && postRefs.current[highlightPostId]) {
+      postRefs.current[highlightPostId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlightPostId, posts]);
+
+  // Real-time post updates
+  const { socket } = useSocket();
+  useEffect(() => {
+    if (!socket) return;
+
+    const handlePostUpdate = (event: any) => {
+      console.log('⚡ Feed received post_updated:', event);
+      // Update post stats in real-time
+      if (event.type === 'POST_UPDATED' && event.metadata) {
+        setPosts(prev => {
+          console.log('Current posts in state:', prev.length);
+          return prev.map(post => {
+            if (post.id === event.targetEntityId) {
+              console.log(`✅ Updating post ${post.id} likes to ${event.metadata.likesCount}`);
+              return {
+                ...post,
+                likesCount: event.metadata.likesCount,
+                _count: {
+                  ...post._count,
+                  likes: event.metadata.likesCount
+                }
+              };
+            }
+            return post;
+          });
+        });
+      }
+    };
+
+
+    socket.on('post_updated', handlePostUpdate);
+
+    return () => {
+      socket.off('post_updated', handlePostUpdate);
+    };
+  }, [socket]);
+
+  /**
+   * Toggle bookmark on a post (persists to backend)
+   */
+  const handleBookmark = async (postId: string) => {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+
+    // Optimistic update
+    setBookmarkedPosts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(postId)) {
+        newSet.delete(postId);
+      } else {
+        newSet.add(postId);
+      }
+      return newSet;
+    });
+
+    try {
+      await axios.post(
+        `${SOCIAL_API_URL}/api/bookmarks/${postId}`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch {
+      // Revert on failure
+      setBookmarkedPosts(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(postId)) {
+          newSet.delete(postId);
+        } else {
+          newSet.add(postId);
+        }
+        return newSet;
+      });
+    }
+  };
+
+  /**
+   * Copy shareable deep link to clipboard
+   */
+  const handleShare = async (postId: string) => {
+    const url = `${window.location.origin}${window.location.pathname}#/post/${postId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareTooltip(postId);
+      setTimeout(() => setShareTooltip(null), 2000);
+    } catch {
+      // Fallback for older browsers
+      const textarea = document.createElement('textarea');
+      textarea.value = url;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setShareTooltip(postId);
+      setTimeout(() => setShareTooltip(null), 2000);
+    }
+  };
+
   const handleLike = async (postId: string) => {
+    // Prevent concurrent like requests for the same post
+    if (likingInProgress.has(postId)) return;
+
     try {
       const token = localStorage.getItem('authToken');
-      
+
       if (!token) {
         alert('Please login to like posts');
         return;
       }
+
+      // Lock this post
+      setLikingInProgress(prev => new Set(prev).add(postId));
 
       const response = await axios.post(
         `${SOCIAL_API_URL}/api/posts/${postId}/like`,
@@ -133,7 +288,7 @@ export const Feed: React.FC = () => {
 
       // Use backend response to update state
       const { liked, likesCount } = response.data;
-      
+
       // Update liked posts state based on backend response
       setLikedPosts(prev => {
         const newSet = new Set(prev);
@@ -163,7 +318,7 @@ export const Feed: React.FC = () => {
     } catch (err: unknown) {
       console.error('Failed to like post:', err);
       const error = err as { response?: { status?: number; data?: { error?: string } } };
-      
+
       if (error.response?.status === 401) {
         alert('Session expired. Please login again.');
         localStorage.clear();
@@ -171,13 +326,20 @@ export const Feed: React.FC = () => {
       } else {
         alert(error.response?.data?.error || 'Failed to like post');
       }
+    } finally {
+      // Unlock this post
+      setLikingInProgress(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(postId);
+        return newSet;
+      });
     }
   };
 
   const handleFollow = async (userId: string) => {
     try {
       const token = localStorage.getItem('authToken');
-      
+
       if (!token) {
         alert('Please login to follow users');
         return;
@@ -221,7 +383,7 @@ export const Feed: React.FC = () => {
       const response = await axios.get(`${SOCIAL_API_URL}/api/comments?postId=${postId}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      
+
       setPostComments(prev => ({
         ...prev,
         [postId]: response.data.comments || []
@@ -240,7 +402,7 @@ export const Feed: React.FC = () => {
   // Toggle comments section
   const handleComment = async (postId: string) => {
     const isExpanded = expandedComments.has(postId);
-    
+
     if (isExpanded) {
       // Collapse
       setExpandedComments(prev => {
@@ -261,7 +423,7 @@ export const Feed: React.FC = () => {
   const submitComment = async (postId: string) => {
     const content = commentInputs[postId]?.trim();
     if (!content) return;
-    
+
     const token = localStorage.getItem('authToken');
     if (!token) {
       alert('Please login to comment');
@@ -270,7 +432,7 @@ export const Feed: React.FC = () => {
 
     try {
       setSubmittingComment(prev => new Set(prev).add(postId));
-      
+
       const response = await axios.post(
         `${SOCIAL_API_URL}/api/comments`,
         { postId, content },
@@ -313,7 +475,7 @@ export const Feed: React.FC = () => {
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const hours = Math.floor(diff / (1000 * 60 * 60));
-    
+
     if (hours < 1) return 'Just now';
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
@@ -334,7 +496,7 @@ export const Feed: React.FC = () => {
       <div className="max-w-2xl mx-auto py-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
           <p className="text-red-600">{error}</p>
-          <button 
+          <button
             onClick={fetchPosts}
             className="mt-2 text-red-700 hover:text-red-900 font-medium"
           >
@@ -374,19 +536,27 @@ export const Feed: React.FC = () => {
   return (
     <div className="max-w-2xl mx-auto py-6">
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Your Feed</h2>
-      
+
       <div className="space-y-6">
         {posts.map((post) => {
           const isLiked = likedPosts.has(post.id);
           const isFollowing = followedUsers.has(post.userId);
           const isOwnPost = post.userId === user?.id;
-          
+
+          const isBookmarked = bookmarkedPosts.has(post.id);
+          const isHighlighted = highlightPostId === post.id;
+
           return (
-            <div key={post.id} className="bg-white rounded-lg shadow-md overflow-hidden">
+            <div
+              key={post.id}
+              ref={(el) => { postRefs.current[post.id] = el; }}
+              className={`bg-white rounded-lg shadow-md overflow-hidden transition-all duration-500 ${isHighlighted ? 'ring-2 ring-purple-500 ring-offset-2' : ''
+                }`}
+            >
               {/* Post Header */}
               <div className="flex items-center justify-between p-4">
                 <div className="flex items-center gap-3">
-                  <button 
+                  <button
                     onClick={() => handleUserClick(post.userId)}
                     className="hover:opacity-80 transition"
                   >
@@ -397,7 +567,7 @@ export const Feed: React.FC = () => {
                     />
                   </button>
                   <div>
-                    <button 
+                    <button
                       onClick={() => handleUserClick(post.userId)}
                       className="font-semibold text-gray-900 hover:text-purple-600 transition"
                     >
@@ -406,16 +576,15 @@ export const Feed: React.FC = () => {
                     <p className="text-xs text-gray-500">{formatTime(post.createdAt)}</p>
                   </div>
                 </div>
-                
+
                 {/* Follow Button */}
                 {!isOwnPost && (
                   <button
                     onClick={() => handleFollow(post.userId)}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-medium text-sm transition ${
-                      isFollowing
-                        ? 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                        : 'bg-purple-600 hover:bg-purple-700 text-white'
-                    }`}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-medium text-sm transition ${isFollowing
+                      ? 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                      : 'bg-purple-600 hover:bg-purple-700 text-white'
+                      }`}
                   >
                     {isFollowing ? (
                       <>
@@ -432,172 +601,187 @@ export const Feed: React.FC = () => {
                 )}
               </div>
 
-            {/* Post Image */}
-            {post.imageUrl && (
-              <img
-                src={post.imageUrl}
-                alt="Post content"
-                className="w-full h-96 object-cover"
-              />
-            )}
-
-            {/* Post Actions */}
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={() => handleLike(post.id)}
-                    className="hover:opacity-70 transition-opacity"
-                    aria-label="Like"
-                  >
-                    <Heart 
-                      className={`w-6 h-6 ${isLiked ? 'fill-red-500 text-red-500' : ''}`}
-                    />
-                  </button>
-                  <button
-                    onClick={() => handleComment(post.id)}
-                    className="hover:opacity-70 transition-opacity"
-                    aria-label="Comment"
-                  >
-                    <MessageCircle className="w-6 h-6" />
-                  </button>
-                  <button
-                    className="hover:opacity-70 transition-opacity"
-                    aria-label="Share"
-                  >
-                    <Share2 className="w-6 h-6" />
-                  </button>
-                </div>
-                <button
-                  className="hover:opacity-70 transition-opacity"
-                  aria-label="Save"
-                >
-                  <Bookmark className="w-6 h-6" />
-                </button>
-              </div>
-
-              {/* Post Stats */}
-              <div className="mb-2">
-                <p className="font-semibold text-gray-900">
-                  {(post.likesCount || post._count?.likes || 0).toLocaleString()} {(post.likesCount || post._count?.likes || 0) === 1 ? 'like' : 'likes'}
-                </p>
-              </div>
-
-              {/* Post Caption */}
-              {post.caption && (
-                <div className="mb-2">
-                  <p className="text-gray-900">
-                    <span className="font-semibold mr-2">{post.user.username}</span>
-                    {post.caption}
-                  </p>
-                </div>
+              {/* Post Image */}
+              {post.imageUrl && (
+                <img
+                  src={post.imageUrl}
+                  alt="Post content"
+                  className="w-full h-96 object-cover"
+                />
               )}
 
-              {/* Comments Section */}
-              <div className="border-t border-gray-100 mt-2 pt-2">
-                {/* View/Hide Comments Toggle */}
-                {post._count.comments > 0 && (
+              {/* Post Actions */}
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={() => handleLike(post.id)}
+                      disabled={likingInProgress.has(post.id)}
+                      className={`hover:opacity-70 transition-opacity ${likingInProgress.has(post.id) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      aria-label="Like"
+                    >
+                      <Heart
+                        className={`w-6 h-6 ${isLiked ? 'fill-red-500 text-red-500' : ''}`}
+                      />
+                    </button>
+                    <button
+                      onClick={() => handleComment(post.id)}
+                      className="hover:opacity-70 transition-opacity"
+                      aria-label="Comment"
+                    >
+                      <MessageCircle className="w-6 h-6" />
+                    </button>
+                    <div className="relative">
+                      <button
+                        onClick={() => handleShare(post.id)}
+                        className="hover:opacity-70 transition-opacity"
+                        aria-label="Share"
+                      >
+                        <Share2 className="w-6 h-6" />
+                      </button>
+                      {shareTooltip === post.id && (
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black text-white text-xs px-2 py-1 rounded whitespace-nowrap flex items-center gap-1 animate-fade-in">
+                          <Check size={12} /> Link copied!
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   <button
-                    onClick={() => handleComment(post.id)}
-                    className="text-gray-500 text-sm hover:text-gray-700 flex items-center gap-1 mb-2"
+                    onClick={() => handleBookmark(post.id)}
+                    className={`hover:opacity-70 transition-all duration-200 ${isBookmarked ? 'text-yellow-500' : ''}`}
+                    aria-label="Save"
                   >
-                    {expandedComments.has(post.id) ? (
-                      <>
-                        <ChevronUp className="w-4 h-4" />
-                        Hide comments
-                      </>
+                    {isBookmarked ? (
+                      <BookmarkCheck className="w-6 h-6 fill-current" />
                     ) : (
-                      <>
-                        <ChevronDown className="w-4 h-4" />
-                        View all {post._count.comments} comments
-                      </>
+                      <Bookmark className="w-6 h-6" />
                     )}
                   </button>
-                )}
+                </div>
 
-                {/* Expanded Comments List */}
-                {expandedComments.has(post.id) && (
-                  <div className="space-y-3 max-h-64 overflow-y-auto">
-                    {loadingComments.has(post.id) ? (
-                      <p className="text-gray-400 text-sm">Loading comments...</p>
-                    ) : postComments[post.id]?.length > 0 ? (
-                      postComments[post.id].map((comment) => (
-                        <div key={comment.id} className="flex gap-2">
-                          <img
-                            src={comment.user.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${comment.user.username}`}
-                            alt={comment.user.username}
-                            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm">
-                              <span className="font-semibold mr-2">
-                                {comment.user.username}
-                                {/* Show test badge for test users */}
-                                {comment.user.username.startsWith('test_') && (
-                                  <span className="ml-1 text-xs bg-purple-100 text-purple-600 px-1 rounded">test</span>
-                                )}
-                              </span>
-                              <span className="text-gray-800">{comment.content}</span>
-                            </p>
-                            <p className="text-xs text-gray-400 mt-0.5">{formatTime(comment.createdAt)}</p>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-gray-400 text-sm">No comments yet</p>
-                    )}
+                {/* Post Stats */}
+                <div className="mb-2">
+                  <p className="font-semibold text-gray-900">
+                    {(post.likesCount || post._count?.likes || 0).toLocaleString()} {(post.likesCount || post._count?.likes || 0) === 1 ? 'like' : 'likes'}
+                  </p>
+                </div>
+
+                {/* Post Caption */}
+                {post.caption && (
+                  <div className="mb-2">
+                    <p className="text-gray-900">
+                      <span className="font-semibold mr-2">{post.user.username}</span>
+                      {post.caption}
+                    </p>
                   </div>
                 )}
 
-                {/* Add Comment Input */}
-                <div className="flex items-center gap-2 mt-3 pt-2 border-t border-gray-100">
-                  <input
-                    type="text"
-                    placeholder="Add a comment..."
-                    value={commentInputs[post.id] || ''}
-                    onChange={(e) => setCommentInputs(prev => ({ ...prev, [post.id]: e.target.value }))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        submitComment(post.id);
-                      }
-                    }}
-                    className="flex-1 text-sm border-none outline-none placeholder-gray-400"
-                    disabled={submittingComment.has(post.id)}
-                  />
-                  <button
-                    onClick={() => submitComment(post.id)}
-                    disabled={!commentInputs[post.id]?.trim() || submittingComment.has(post.id)}
-                    className={`text-blue-500 font-semibold text-sm ${
-                      !commentInputs[post.id]?.trim() || submittingComment.has(post.id)
+                {/* Comments Section */}
+                <div className="border-t border-gray-100 mt-2 pt-2">
+                  {/* View/Hide Comments Toggle */}
+                  {post._count.comments > 0 && (
+                    <button
+                      onClick={() => handleComment(post.id)}
+                      className="text-gray-500 text-sm hover:text-gray-700 flex items-center gap-1 mb-2"
+                    >
+                      {expandedComments.has(post.id) ? (
+                        <>
+                          <ChevronUp className="w-4 h-4" />
+                          Hide comments
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="w-4 h-4" />
+                          View all {post._count.comments} comments
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {/* Expanded Comments List */}
+                  {expandedComments.has(post.id) && (
+                    <div className="space-y-3 max-h-64 overflow-y-auto">
+                      {loadingComments.has(post.id) ? (
+                        <p className="text-gray-400 text-sm">Loading comments...</p>
+                      ) : postComments[post.id]?.length > 0 ? (
+                        postComments[post.id].map((comment) => (
+                          <div key={comment.id} className="flex gap-2">
+                            <img
+                              src={comment.user.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${comment.user.username}`}
+                              alt={comment.user.username}
+                              className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm">
+                                <span className="font-semibold mr-2">
+                                  {comment.user.username}
+                                  {/* Show test badge for test users */}
+                                  {comment.user.username.startsWith('test_') && (
+                                    <span className="ml-1 text-xs bg-purple-100 text-purple-600 px-1 rounded">test</span>
+                                  )}
+                                </span>
+                                <span className="text-gray-800">{comment.content}</span>
+                              </p>
+                              <p className="text-xs text-gray-400 mt-0.5">{formatTime(comment.createdAt)}</p>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-gray-400 text-sm">No comments yet</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Add Comment Input */}
+                  <div className="flex items-center gap-2 mt-3 pt-2 border-t border-gray-100">
+                    <input
+                      type="text"
+                      placeholder="Add a comment..."
+                      value={commentInputs[post.id] || ''}
+                      onChange={(e) => setCommentInputs(prev => ({ ...prev, [post.id]: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          submitComment(post.id);
+                        }
+                      }}
+                      className="flex-1 text-sm border-none outline-none placeholder-gray-400"
+                      disabled={submittingComment.has(post.id)}
+                    />
+                    <button
+                      onClick={() => submitComment(post.id)}
+                      disabled={!commentInputs[post.id]?.trim() || submittingComment.has(post.id)}
+                      className={`text-blue-500 font-semibold text-sm ${!commentInputs[post.id]?.trim() || submittingComment.has(post.id)
                         ? 'opacity-50 cursor-not-allowed'
                         : 'hover:text-blue-600'
-                    }`}
-                  >
-                    {submittingComment.has(post.id) ? (
-                      <span className="animate-pulse">...</span>
-                    ) : (
-                      <Send className="w-5 h-5" />
-                    )}
-                  </button>
+                        }`}
+                    >
+                      {submittingComment.has(post.id) ? (
+                        <span className="animate-pulse">...</span>
+                      ) : (
+                        <Send className="w-5 h-5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Post Tester - Auto-filled with post ID and user info */}
-            <PostTester 
-              postId={post.id}
-              postOwnerId={post.user.id}
-              username={post.user.username}
-              onDataChange={() => {
-                // Refresh posts and comments when test data changes
-                fetchPosts();
-                if (expandedComments.has(post.id)) {
-                  fetchComments(post.id);
-                }
-              }}
-            />
-          </div>
+              {/* Post Tester - Only visible in Testing mode */}
+              {isTesting && (
+                <PostTester
+                  postId={post.id}
+                  postOwnerId={post.user.id}
+                  username={post.user.username}
+                  onDataChange={() => {
+                    // Refresh posts and comments when test data changes
+                    fetchPosts();
+                    if (expandedComments.has(post.id)) {
+                      fetchComments(post.id);
+                    }
+                  }}
+                />
+              )}
+            </div>
           );
         })}
       </div>

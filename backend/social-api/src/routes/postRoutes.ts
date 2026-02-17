@@ -10,7 +10,7 @@ import { PrismaClient } from '../../../shared/prisma/generated/client';
 import { authMiddleware, optionalAuthMiddleware, AuthRequest } from '../middleware/auth';
 import { sendNotificationEvent } from '../utils/kafka';
 import { v4 as uuidv4 } from 'uuid';
-import { incrementLikeCount, getLikeCount } from '../../../shared/services/redis-cache-service';
+import { getLikeCount } from '../../../shared/services/redis-cache-service';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -254,7 +254,7 @@ router.get('/', optionalAuthMiddleware, async (req: AuthRequest, res: Response) 
 
 /**
  * POST /api/posts/:postId/like
- * Like/Unlike a post (authenticated)
+ * Like/Unlike a post (authenticated) — proper DB toggle
  */
 router.post('/:postId/like', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
@@ -281,57 +281,92 @@ router.post('/:postId/like', authMiddleware, async (req: AuthRequest, res: Respo
       return;
     }
 
-    // BATCHING: Don't write to DB immediately - let processing-service batch it
-    // Write to Redis cache for instant count updates
-    let liked = true;
-    const newLikeCount = await incrementLikeCount(postId);
+    // Check if already liked
+    const existingLike = await prisma.like.findUnique({
+      where: {
+        postId_userId: { postId, userId }
+      }
+    });
 
-    // Send notification to post owner (if not self-like)
-    if (post.userId !== userId) {
-      const liker = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { username: true, name: true, avatarUrl: true }
+    let liked: boolean;
+
+    if (existingLike) {
+      // UNLIKE: delete the like record
+      await prisma.like.delete({
+        where: { postId_userId: { postId, userId } }
       });
+      liked = false;
+    } else {
+      // LIKE: create the like record
+      await prisma.like.create({
+        data: { postId, userId }
+      });
+      liked = true;
 
-      // Check if post owner follows the liker (for priority)
-      const isFollowed = await prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: post.userId,
-            followingId: userId
+      // Send notification to post owner (only on LIKE, not unlike)
+      if (post.userId !== userId) {
+        const liker = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { username: true, name: true, avatarUrl: true }
+        });
+
+        const isFollowed = await prisma.follow.findUnique({
+          where: {
+            followerId_followingId: {
+              followerId: post.userId,
+              followingId: userId
+            }
           }
-        }
-      });
+        });
 
-      // HIGH priority for all social interactions
-      await sendNotificationEvent({
-        id: uuidv4(),
-        type: 'LIKE',
-        priority: 'HIGH',
-        actorId: userId,
-        actorName: liker?.name || liker?.username || 'Someone',
-        actorAvatar: liker?.avatarUrl,
-        targetId: post.userId,
-        targetType: 'POST',
-        targetEntityId: postId,
-        title: 'New Like',
-        message: `${liker?.name || liker?.username} liked your post`,
-        imageUrl: post.imageUrl,
-        timestamp: new Date().toISOString(),
-        metadata: {
-          postUrl: `/posts/${postId}`,
-          isFromFollowedUser: !!isFollowed,
-        }
-      });
+        await sendNotificationEvent({
+          id: uuidv4(),
+          type: 'LIKE',
+          priority: 'HIGH',
+          actorId: userId,
+          actorName: liker?.name || liker?.username || 'Someone',
+          actorAvatar: liker?.avatarUrl,
+          targetId: post.userId,
+          targetType: 'POST',
+          targetEntityId: postId,
+          title: 'New Like',
+          message: `${liker?.name || liker?.username} liked your post`,
+          imageUrl: post.imageUrl,
+          timestamp: new Date().toISOString(),
+          metadata: {
+            postUrl: `/posts/${postId}`,
+            isFromFollowedUser: !!isFollowed,
+          }
+        });
+      }
     }
 
-    // Get like count from Redis cache (instant) or PostgreSQL (fallback)
-    const likesCount = await getLikeCount(postId, prisma);
+    // Invalidate Redis cache so next read gets fresh DB count
+    const { clearPostCache } = await import('../../../shared/services/redis-cache-service');
+    await clearPostCache(postId);
+
+    // Get authoritative count from DB
+    const likesCount = await prisma.like.count({ where: { postId } });
+
+    // REAL-TIME UPDATE: Broadcast new like count to all users
+    await sendNotificationEvent({
+      id: uuidv4(),
+      type: 'POST_UPDATED',
+      priority: 'LOW',
+      actorId: userId,
+      targetId: 'broadcast', // Special target for broadcast
+      targetType: 'POST',
+      targetEntityId: postId,
+      timestamp: new Date().toISOString(),
+      metadata: {
+        likesCount
+      }
+    });
 
     res.json({
       success: true,
       liked,
-      likesCount // Real-time count from Redis cache
+      likesCount
     });
   } catch (error: any) {
     console.error('❌ Like/Unlike error:', error);

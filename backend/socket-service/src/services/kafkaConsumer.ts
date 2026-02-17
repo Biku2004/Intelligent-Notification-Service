@@ -12,7 +12,7 @@ const kafka = new Kafka({
   },
 });
 
-const consumer = kafka.consumer({ 
+const consumer = kafka.consumer({
   groupId: 'socket-delivery-consumer',
   sessionTimeout: 30000,
   heartbeatInterval: 3000,
@@ -23,11 +23,11 @@ const connectedUsers = new Map<string, Set<string>>(); // userId -> Set of socke
 
 export const startKafkaConsumer = async (io: Server) => {
   console.log('🔌 Starting Kafka consumer for WebSocket delivery...');
-  
+
   await consumer.connect();
-  await consumer.subscribe({ 
-    topic: KAFKA_TOPICS.READY, 
-    fromBeginning: false 
+  await consumer.subscribe({
+    topic: KAFKA_TOPICS.READY,
+    fromBeginning: false
   });
 
   await consumer.run({
@@ -37,6 +37,13 @@ export const startKafkaConsumer = async (io: Server) => {
 
       const event: NotificationEvent = JSON.parse(rawValue);
       console.log(`🔥 Pushing to Frontend: ${event.type} -> ${event.targetId}`);
+
+      // Special handling for broadcast events
+      if (event.type === 'POST_UPDATED') {
+        console.log(`📢 Broadcasting POST_UPDATED for ${event.targetEntityId}`);
+        io.emit('post_updated', event);
+        return;
+      }
 
       // Check if user wants push notifications
       const pushEnabled = event.metadata?.channels?.includes('PUSH') ?? true;

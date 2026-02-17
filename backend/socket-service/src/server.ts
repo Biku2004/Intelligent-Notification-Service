@@ -1,24 +1,28 @@
+import './config/env'; // MUST BE FIRST
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
-import dotenv from 'dotenv';
+// import dotenv from 'dotenv'; // Handled in ./config/env
+import path from 'path';
 import cors from 'cors';
-import { 
-  startKafkaConsumer, 
-  userConnected, 
+import jwt from 'jsonwebtoken';
+import {
+  startKafkaConsumer,
+  userConnected,
   userDisconnected,
-  getConnectedUserCount 
+  getConnectedUserCount
 } from './services/kafkaConsumer';
 
-dotenv.config();
+// Load .env from project root (3 levels up: src -> socket-service -> backend -> root)
+// dotenv.config({ path: path.resolve(__dirname, '../../..', '.env') }); // Moved to ./config/env
 
 const app = express();
 app.use(cors());
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
+  res.json({
+    status: 'healthy',
     service: 'socket-service',
     connectedUsers: getConnectedUserCount(),
     uptime: process.uptime(),
@@ -39,11 +43,50 @@ const io = new Server(server, {
 io.on('connection', (socket) => {
   console.log('🔌 New connection:', socket.id);
 
-  // User joins their own room (e.g., "user_123")
-  socket.on('join_room', (userId: string) => {
+  // SECURITY: C4 Fix - Authenticate join_room with JWT token
+  socket.on('join_room', (data: { userId: string; token: string } | string) => {
+    // Support both old format (just userId string) and new format (object with token)
+    let userId: string;
+    let token: string | undefined;
+
+    if (typeof data === 'string') {
+      // Legacy format — no auth (reject in production)
+      userId = data;
+      console.warn(`⚠️ join_room called without token for user ${userId}`);
+      if (process.env.NODE_ENV === 'production') {
+        socket.emit('error', { message: 'Authentication required' });
+        return;
+      }
+    } else {
+      userId = data.userId;
+      token = data.token;
+    }
+
+    // Verify JWT token if provided
+    if (token) {
+      try {
+        const jwtSecret = process.env.JWT_SECRET;
+        if (!jwtSecret) {
+          console.error('❌ JWT_SECRET not configured for socket service');
+          socket.emit('error', { message: 'Server configuration error' });
+          return;
+        }
+        const decoded = jwt.verify(token, jwtSecret) as { userId: string };
+        if (decoded.userId !== userId) {
+          console.warn(`🚫 Token userId mismatch: token=${decoded.userId}, requested=${userId}`);
+          socket.emit('error', { message: 'User ID does not match token' });
+          return;
+        }
+      } catch (err) {
+        console.warn(`🚫 Invalid token for join_room: ${(err as Error).message}`);
+        socket.emit('error', { message: 'Invalid or expired token' });
+        return;
+      }
+    }
+
     socket.join(userId);
     userConnected(userId, socket.id);
-    
+
     // Send acknowledgment
     socket.emit('joined', { userId, socketId: socket.id });
     console.log(`✅ User ${socket.id} joined room: ${userId}`);

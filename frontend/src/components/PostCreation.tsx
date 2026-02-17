@@ -6,12 +6,11 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { X, Image as ImageIcon, Loader } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-
-const API_BASE = 'http://localhost:3003';
+import { SOCIAL_API_URL } from '../config/api';
 
 interface PostCreationProps {
   onClose: () => void;
-  onPostCreated?: () => void;
+  onPostCreated: () => void;
 }
 
 export const PostCreation: React.FC<PostCreationProps> = ({ onClose, onPostCreated }) => {
@@ -23,7 +22,7 @@ export const PostCreation: React.FC<PostCreationProps> = ({ onClose, onPostCreat
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!caption && !imageUrl) {
       setError('Please add a caption or image');
       return;
@@ -35,7 +34,7 @@ export const PostCreation: React.FC<PostCreationProps> = ({ onClose, onPostCreat
 
       const token = localStorage.getItem('authToken');
       const response = await axios.post(
-        `${API_BASE}/api/posts`, 
+        `${SOCIAL_API_URL}/api/posts`,
         {
           caption,
           imageUrl
@@ -122,9 +121,9 @@ export const PostCreation: React.FC<PostCreationProps> = ({ onClose, onPostCreat
           {/* Image Preview */}
           {imageUrl && (
             <div className="mt-4 rounded-lg overflow-hidden border border-gray-200">
-              <img 
-                src={imageUrl} 
-                alt="Preview" 
+              <img
+                src={imageUrl}
+                alt="Preview"
                 className="w-full h-64 object-cover"
                 onError={() => setImageUrl('')}
               />

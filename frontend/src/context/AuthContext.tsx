@@ -2,22 +2,25 @@
  * Authentication Context
  * Provides user state and authentication methods across the app
  */
-import React, { createContext, useState, ReactNode } from 'react';
+import React, { createContext, useState } from 'react';
+import type { ReactNode } from 'react';
 import axios from 'axios';
+import { SOCIAL_API_URL } from '../config/api';
 import type { User, AuthResponse } from '../types';
 
+// Update AuthContextType as per instruction
 export interface AuthContextType {
   user: User | null;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string, name?: string) => Promise<void>;
   logout: () => void;
-  updateUser: (updates: Partial<User>) => void;
+  updateUser: (userData: Partial<User>) => void; // Changed parameter name to userData
 }
 
 export const AuthContext = createContext<AuthContextType | null>(null);
 
-const API_BASE = 'http://localhost:3003';
+// Remove const API_BASE = 'http://localhost:3003';
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Initialize state from localStorage
@@ -25,7 +28,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const storedUser = localStorage.getItem('authUser');
       if (!storedUser) return null;
-      
+
       const parsedUser = JSON.parse(storedUser);
       // Validate that the user object has required properties
       if (parsedUser && parsedUser.id && parsedUser.email) {
@@ -42,11 +45,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return null;
     }
   });
-  
+
   const [token, setToken] = useState<string | null>(() => {
     const storedToken = localStorage.getItem('authToken');
     const storedUser = localStorage.getItem('authUser');
-    
+
     // Only set token if both token and user exist
     if (storedToken && storedUser) {
       try {
@@ -60,7 +63,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.error('Error validating stored auth:', error);
       }
     }
-    
+
     // Clear invalid data
     localStorage.removeItem('authToken');
     localStorage.removeItem('authUser');
@@ -68,7 +71,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const login = async (email: string, password: string) => {
-    const response = await axios.post<AuthResponse>(`${API_BASE}/api/auth/login`, {
+    const response = await axios.post<AuthResponse>(`${SOCIAL_API_URL}/api/auth/login`, {
       email,
       password
     });
@@ -84,7 +87,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const register = async (email: string, username: string, password: string, name?: string) => {
-    const response = await axios.post<AuthResponse>(`${API_BASE}/api/auth/register`, {
+    const response = await axios.post<AuthResponse>(`${SOCIAL_API_URL}/api/auth/register`, {
       email,
       username,
       password,

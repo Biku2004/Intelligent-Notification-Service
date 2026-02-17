@@ -36,6 +36,7 @@ model User {
   posts       Post[]
   comments    Comment[]
   likes       Like[]
+  bookmarks   Bookmark[]
 
   // Follow relationships
   following Follow[] @relation("UserFollowing")
@@ -95,8 +96,9 @@ model Post {
   updatedAt DateTime @updatedAt
 
   // Relations
-  comments Comment[]
-  likes    Like[]
+  comments  Comment[]
+  likes     Like[]
+  bookmarks Bookmark[]
 
   @@index([userId])
   @@index([createdAt])
@@ -139,6 +141,21 @@ model Like {
   @@unique([postId, userId])
   @@index([postId])
   @@index([userId])
+}
+
+model Bookmark {
+  id     String @id @default(uuid())
+  postId String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([userId])
+  @@index([postId])
 }
 
 model Follow {

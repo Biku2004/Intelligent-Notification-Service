@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { SocketProvider } from './context/SocketProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthProvider } from './context/AuthContext';
+import { AppModeProvider } from './context/AppModeContext';
 import { useAuth } from './hooks/useAuth';
 import { useSocket } from './hooks/useSocket';
 import { Navbar } from './components/Navbar';
@@ -27,6 +28,26 @@ function AppContent() {
   const [showAuth, setShowAuth] = useState<'login' | 'register'>('login');
   const [refreshFeed, setRefreshFeed] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
+
+  // Deep-link support: parse URL hash for post ID or user profile
+  const [deepLinkPostId, setDeepLinkPostId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const hash = window.location.hash;
+    // Format: #/post/<postId>
+    const postMatch = hash.match(/^#\/post\/(.+)$/);
+    if (postMatch) {
+      setDeepLinkPostId(postMatch[1]);
+      setCurrentPage('feed');
+    }
+    // Format: #/user/<userId>
+    const userMatch = hash.match(/^#\/user\/(.+)$/);
+    if (userMatch) {
+      setViewingUserId(userMatch[1]);
+      setCurrentPage('profile');
+    }
+  }, []);
 
   // Handle incoming notifications and show toasts for likes (1-5 count)
   useEffect(() => {
@@ -73,6 +94,29 @@ function AppContent() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  /**
+   * Handle navigating to a user profile from search or other components
+   */
+  const handleUserSelect = (userId: string) => {
+    setViewingUserId(userId);
+    setCurrentPage('profile');
+    window.location.hash = `/user/${userId}`;
+  };
+
+  /**
+   * Handle page navigation and update hash
+   */
+  const handleNavigate = (page: Page) => {
+    setCurrentPage(page);
+    if (page === 'feed') {
+      setDeepLinkPostId(null);
+      window.location.hash = '';
+    } else if (page === 'profile') {
+      setViewingUserId(null); // Will show own profile
+      window.location.hash = '';
+    }
+  };
+
   // Show auth screen if not logged in
   if (!user) {
     return (
@@ -86,13 +130,20 @@ function AppContent() {
     );
   }
 
+  const profileUserId = viewingUserId || user.id;
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar
-        onNavigate={setCurrentPage}
+        onNavigate={handleNavigate}
         currentPage={currentPage}
         onCreatePost={() => setShowPostCreation(true)}
-        onProfileClick={() => setCurrentPage('profile')}
+        onProfileClick={() => {
+          setViewingUserId(null);
+          setCurrentPage('profile');
+          window.location.hash = '';
+        }}
+        onUserSelect={handleUserSelect}
       />
 
       {/* Toast Notifications */}
@@ -100,7 +151,7 @@ function AppContent() {
 
       <main className="pt-20 pb-8">
         {currentPage === 'feed' ? (
-          <Feed key={refreshFeed} />
+          <Feed key={refreshFeed} highlightPostId={deepLinkPostId} />
         ) : currentPage === 'preferences' ? (
           <NotificationPreferences />
         ) : currentPage === 'tester' ? (
@@ -110,7 +161,7 @@ function AppContent() {
         ) : currentPage === 'database' ? (
           <DatabaseViewer />
         ) : (
-          <UserProfile userId={user.id} />
+          <UserProfile userId={profileUserId} />
         )}
       </main>
 
@@ -132,9 +183,11 @@ function App() {
   return (
     <AuthProvider>
       <SocketProvider>
-        <ErrorBoundary>
-          <AppContent />
-        </ErrorBoundary>
+        <AppModeProvider>
+          <ErrorBoundary>
+            <AppContent />
+          </ErrorBoundary>
+        </AppModeProvider>
       </SocketProvider>
     </AuthProvider>
   );

@@ -4,12 +4,13 @@ import { useSocket } from '../hooks/useSocket';
 import { NotificationItem } from './NotificationItem';
 import axios from 'axios';
 import type { NotificationEvent } from '../types';
-
-const CURRENT_USER_ID = 'user_999'; // Should come from auth context
-const API_BASE = 'http://localhost:3002';
+import { useAuth } from '../hooks/useAuth';
+import { NOTIFICATION_API_URL } from '../config/api';
 
 export const NotificationBell: React.FC = () => {
-  const { unreadCount, notifications: liveNotifications } = useSocket()!;
+  const { user } = useAuth();
+  const { unreadCount, notifications: liveNotifications, markAsRead: socketMarkAsRead } = useSocket();
+  const currentUserId = user?.id;
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
   const [allNotifications, setAllNotifications] = useState<NotificationEvent[]>([]);
@@ -35,10 +36,10 @@ export const NotificationBell: React.FC = () => {
 
   // Fetch notification history when dropdown opens
   useEffect(() => {
-    if (isOpen && allNotifications.length === 0) {
+    if (isOpen && allNotifications.length === 0 && currentUserId) {
       fetchNotifications();
     }
-  }, [isOpen, allNotifications.length]);
+  }, [isOpen, allNotifications.length, currentUserId]);
 
   // Merge live notifications with fetched history
   useEffect(() => {
@@ -52,13 +53,16 @@ export const NotificationBell: React.FC = () => {
   }, [liveNotifications]);
 
   const fetchNotifications = async () => {
+    if (!currentUserId) return;
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE}/api/notifications/${CURRENT_USER_ID}`, {
-        params: { limit: 50 }
+      const token = localStorage.getItem('authToken');
+      const response = await axios.get(`${NOTIFICATION_API_URL}/api/notifications/${currentUserId}`, {
+        params: { limit: 50 },
+        headers: { Authorization: `Bearer ${token}` }
       });
       if (response.data.success) {
-        const fetchedNotifications = response.data.notifications.map((n: NotificationEvent) => ({
+        const fetchedNotifications = response.data.notifications.map((n: any) => ({
           id: n.id,
           type: n.type,
           priority: n.priority,
@@ -68,12 +72,13 @@ export const NotificationBell: React.FC = () => {
           title: n.title,
           message: n.message,
           imageUrl: n.imageUrl,
-          timestamp: n.createdAt,
+          targetId: n.targetId || n.userId,
+          timestamp: n.createdAt || n.timestamp,
           isRead: n.isRead,
           metadata: {
             isAggregated: n.isAggregated,
             aggregatedCount: n.aggregatedCount,
-            channels: n.channels ? JSON.parse(n.channels) : undefined,
+            channels: Array.isArray(n.channels) ? n.channels : undefined,
           }
         }));
         setAllNotifications(fetchedNotifications);
@@ -89,18 +94,26 @@ export const NotificationBell: React.FC = () => {
     setIsOpen(!isOpen);
   };
 
-  const markAllAsRead = async () => {
+  const handleMarkAllAsRead = async () => {
+    if (!currentUserId) return;
     try {
-      await axios.patch(`${API_BASE}/api/notifications/${CURRENT_USER_ID}/read-all`);
+      const token = localStorage.getItem('authToken');
+      await axios.patch(`${NOTIFICATION_API_URL}/api/notifications/${currentUserId}/read-all`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      socketMarkAsRead(); // Update socket context unread count
       setAllNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     } catch (error) {
       console.error('Failed to mark all as read:', error);
     }
   };
 
-  const markAsRead = async (notificationId: string) => {
+  const handleMarkOneAsRead = async (notificationId: string) => {
     try {
-      await axios.patch(`${API_BASE}/api/notifications/${notificationId}/read`);
+      const token = localStorage.getItem('authToken');
+      await axios.patch(`${NOTIFICATION_API_URL}/api/notifications/${notificationId}/read`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       setAllNotifications(prev =>
         prev.map(n => n.id === notificationId ? { ...n, isRead: true } : n)
       );
@@ -138,7 +151,7 @@ export const NotificationBell: React.FC = () => {
               <h3 className="text-lg font-bold text-gray-900">Notifications</h3>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={markAllAsRead}
+                  onClick={handleMarkAllAsRead}
                   className="p-2 hover:bg-white rounded-full transition-colors"
                   title="Mark all as read"
                 >
@@ -157,21 +170,19 @@ export const NotificationBell: React.FC = () => {
             <div className="flex gap-4 mt-3">
               <button
                 onClick={() => setActiveTab('all')}
-                className={`pb-2 px-1 text-sm font-medium transition-colors relative ${
-                  activeTab === 'all'
-                    ? 'text-purple-600 border-b-2 border-purple-600'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
+                className={`pb-2 px-1 text-sm font-medium transition-colors relative ${activeTab === 'all'
+                  ? 'text-purple-600 border-b-2 border-purple-600'
+                  : 'text-gray-500 hover:text-gray-700'
+                  }`}
               >
                 All ({allNotifications.length})
               </button>
               <button
                 onClick={() => setActiveTab('unread')}
-                className={`pb-2 px-1 text-sm font-medium transition-colors relative ${
-                  activeTab === 'unread'
-                    ? 'text-purple-600 border-b-2 border-purple-600'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
+                className={`pb-2 px-1 text-sm font-medium transition-colors relative ${activeTab === 'unread'
+                  ? 'text-purple-600 border-b-2 border-purple-600'
+                  : 'text-gray-500 hover:text-gray-700'
+                  }`}
               >
                 Unread ({allNotifications.filter(n => !n.isRead).length})
               </button>
@@ -198,7 +209,7 @@ export const NotificationBell: React.FC = () => {
                 <NotificationItem
                   key={notification.id}
                   notification={notification}
-                  onClick={() => markAsRead(notification.id)}
+                  onClick={() => handleMarkOneAsRead(notification.id)}
                 />
               ))
             )}

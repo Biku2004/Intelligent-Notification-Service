@@ -8,7 +8,7 @@ import {
 } from './services/aggregationService';
 import { executeBatchWrite, batchWriteNotificationHistory } from './services/batchWriteService';
 import { logNotification } from './services/dynamoService';
-import { checkUserPreferences } from './services/preferenceService';
+import { checkUserPreferences, saveNotificationHistory } from './services/preferenceService';
 import { NotificationEvent, NotificationPriority, KAFKA_TOPICS } from '../../shared/types';
 import { ensureTopicsExist } from './config/initTopics';
 import { PrismaClient } from '../../shared/prisma/generated/client';
@@ -121,6 +121,24 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
   console.log(`📥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
   try {
+    // 0. BROADCAST EVENT CHECK
+    // Skip preferences/aggregation/persistence for realtime updates
+    if (event.type === 'POST_UPDATED') {
+      console.log(`⏩ Broadcasting POST_UPDATED for post ${event.targetEntityId}`);
+      await producer.send({
+        topic: KAFKA_TOPICS.READY,
+        messages: [{
+          key: event.targetId || 'broadcast',
+          value: JSON.stringify(event),
+          headers: {
+            priority: Buffer.from(event.priority),
+            type: Buffer.from(event.type),
+          },
+        }],
+      });
+      return;
+    }
+
     // 1. Preference Check (DND, muted categories, etc.)
     console.log(`📥 Step 1: Checking preferences...`);
     let isPreferred = true;
@@ -218,10 +236,15 @@ async function processNotificationEvent(event: NotificationEvent): Promise<void>
     // 6. Log to DynamoDB (fire and forget - non-blocking)
     logNotification(finalEvent, 'SENT');
 
-    // 7. BATCHING: Notification history will be written during window flush
-    // This reduces DB writes from N (every notification) to 1 (per 60s window)
-    // Notifications are still visible on frontend via WebSocket
-    console.log(`⏳ Notification queued for batch DB write (60s window)`);
+    // 7. PERSISTENCE: Save to PostgreSQL History
+    // CRITICAL FIX: Ensure instant notifications are saved to history
+    // (Aggregated ones are saved during flush, but instant ones were being missed)
+    if (!event.metadata?.isAggregated) {
+      saveNotificationHistory(finalEvent, 'SENT');
+      console.log(`💾 Saved instant notification to Postgres history`);
+    } else {
+      console.log(`⏳ Notification queued for batch DB write (60s window)`);
+    }
 
 
     const duration = Date.now() - startTime;

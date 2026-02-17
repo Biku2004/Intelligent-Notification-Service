@@ -31,10 +31,19 @@ const DatabaseViewer: React.FC = () => {
     const [autoRefresh, setAutoRefresh] = useState(true);
     const [lastUpdate, setLastUpdate] = useState<string>('');
 
+    // Map frontend tab names to backend route names
+    const tableRouteMap: Record<string, string> = {
+        notifications: 'notification-history',
+        likes: 'likes',
+        comments: 'comments',
+        follows: 'follows',
+    };
+
     const fetchData = async (table: string) => {
         setLoading(true);
         try {
-            const response = await axios.get(`${NOTIFICATION_API_URL}/api/admin/db/${table}?limit=50`);
+            const routeName = tableRouteMap[table] || table;
+            const response = await axios.get(`${NOTIFICATION_API_URL}/api/admin/db/${routeName}?limit=50`);
             if (response.data.success) {
                 setData(response.data.data);
                 setLastUpdate(new Date().toLocaleTimeString());

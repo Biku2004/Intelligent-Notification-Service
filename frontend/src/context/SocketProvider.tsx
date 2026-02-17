@@ -131,8 +131,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setConnectionState('connected');
       retryCount.current = 0; // Reset retry count on successful connection
 
-      // Join user's room
-      newSocket.emit('join_room', user.id);
+      // Join user's room with authentication token
+      newSocket.emit('join_room', { userId: user.id, token });
     });
 
     newSocket.on('disconnect', (reason) => {
