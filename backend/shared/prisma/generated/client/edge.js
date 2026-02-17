@@ -286,7 +286,7 @@ const config = {
   },
   "relativeEnvPaths": {
     "rootEnvPath": null,
-    "schemaEnvPath": "../../../../notification-api/.env"
+    "schemaEnvPath": "../../../../../.env"
   },
   "relativePath": "../..",
   "clientVersion": "5.22.0",
@@ -295,7 +295,6 @@ const config = {
     "db"
   ],
   "activeProvider": "postgresql",
-  "postinstall": false,
   "inlineDatasources": {
     "db": {
       "url": {

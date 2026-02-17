@@ -71,6 +71,16 @@ CREATE TABLE "Like" (
 );
 
 -- CreateTable
+CREATE TABLE "Bookmark" (
+    "id" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Bookmark_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Follow" (
     "id" TEXT NOT NULL,
     "followerId" TEXT NOT NULL,
@@ -181,6 +191,15 @@ CREATE INDEX "Like_userId_idx" ON "Like"("userId");
 CREATE UNIQUE INDEX "Like_postId_userId_key" ON "Like"("postId", "userId");
 
 -- CreateIndex
+CREATE INDEX "Bookmark_userId_idx" ON "Bookmark"("userId");
+
+-- CreateIndex
+CREATE INDEX "Bookmark_postId_idx" ON "Bookmark"("postId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Bookmark_postId_userId_key" ON "Bookmark"("postId", "userId");
+
+-- CreateIndex
 CREATE INDEX "Follow_followerId_idx" ON "Follow"("followerId");
 
 -- CreateIndex
@@ -239,6 +258,12 @@ ALTER TABLE "Like" ADD CONSTRAINT "Like_postId_fkey" FOREIGN KEY ("postId") REFE
 
 -- AddForeignKey
 ALTER TABLE "Like" ADD CONSTRAINT "Like_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Bookmark" ADD CONSTRAINT "Bookmark_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Bookmark" ADD CONSTRAINT "Bookmark_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Follow" ADD CONSTRAINT "Follow_followerId_fkey" FOREIGN KEY ("followerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

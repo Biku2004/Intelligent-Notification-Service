@@ -7,13 +7,23 @@ const kafka = new Kafka({
 });
 
 export const producer = kafka.producer();
-
+ 
 export const connectKafka = async () => {
-  try {
-    await producer.connect();
-    console.log('✅ Kafka Producer Connected');
-  } catch (error) {
-    console.error('❌ Kafka Connection Error:', error);
-    process.exit(1);
+  const maxRetries = 10;
+  let retries = 0;
+ 
+  while (retries < maxRetries) {
+    try {
+      await producer.connect();
+      console.log('✅ Kafka Producer Connected');
+      return;
+    } catch (error) {
+      retries++;
+      console.error(`❌ Kafka Connection Error (Attempt ${retries}/${maxRetries}):`, (error as Error).message);
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5s
+    }
   }
+ 
+  console.error('❌ Failed to connect to Kafka after multiple attempts');
+  process.exit(1);
 };

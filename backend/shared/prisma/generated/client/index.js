@@ -287,7 +287,7 @@ const config = {
   },
   "relativeEnvPaths": {
     "rootEnvPath": null,
-    "schemaEnvPath": "../../../../notification-api/.env"
+    "schemaEnvPath": "../../../../../.env"
   },
   "relativePath": "../..",
   "clientVersion": "5.22.0",
@@ -296,7 +296,6 @@ const config = {
     "db"
   ],
   "activeProvider": "postgresql",
-  "postinstall": false,
   "inlineDatasources": {
     "db": {
       "url": {
@@ -315,7 +314,7 @@ const fs = require('fs')
 config.dirname = __dirname
 if (!fs.existsSync(path.join(__dirname, 'schema.prisma'))) {
   const alternativePaths = [
-    "../shared/prisma/generated/client",
+    "backend/shared/prisma/generated/client",
     "shared/prisma/generated/client",
   ]
   
@@ -345,7 +344,7 @@ Object.assign(exports, Prisma)
 
 // file annotations for bundling tools to include these files
 path.join(__dirname, "query_engine-windows.dll.node");
-path.join(process.cwd(), "../shared/prisma/generated/client/query_engine-windows.dll.node")
+path.join(process.cwd(), "backend/shared/prisma/generated/client/query_engine-windows.dll.node")
 // file annotations for bundling tools to include these files
 path.join(__dirname, "schema.prisma");
-path.join(process.cwd(), "../shared/prisma/generated/client/schema.prisma")
+path.join(process.cwd(), "backend/shared/prisma/generated/client/schema.prisma")

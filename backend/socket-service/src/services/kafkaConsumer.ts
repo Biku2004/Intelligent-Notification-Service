@@ -25,10 +25,30 @@ export const startKafkaConsumer = async (io: Server) => {
   console.log('🔌 Starting Kafka consumer for WebSocket delivery...');
 
   await consumer.connect();
-  await consumer.subscribe({
-    topic: KAFKA_TOPICS.READY,
-    fromBeginning: false
-  });
+  console.log('✅ Connected to Kafka broker');
+
+  // Retry loop for topic subscription (waiting for processing-service to create topics)
+  let retries = 0;
+  const maxRetries = 20;
+
+  while (retries < maxRetries) {
+    try {
+      await consumer.subscribe({
+        topic: KAFKA_TOPICS.READY,
+        fromBeginning: false
+      });
+      console.log(`✅ Subscribed to topic: ${KAFKA_TOPICS.READY}`);
+      break;
+    } catch (error) {
+      retries++;
+      console.warn(`⚠️ Failed to subscribe to topic (Attempt ${retries}/${maxRetries}): ${(error as Error).message}`);
+      if (retries >= maxRetries) {
+        console.error('❌ Could not subscribe to Kafka topic after multiple attempts');
+        process.exit(1);
+      }
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+  }
 
   await consumer.run({
     eachMessage: async ({ message }) => {
