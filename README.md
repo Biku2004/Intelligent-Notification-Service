@@ -1,520 +1,574 @@
 ﻿# 🔔 Intelligent Notification System
 
-A scalable, real-time notification delivery platform with Instagram-like social features, built with microservices architecture.
+> A production-grade, event-driven notification platform built to demonstrate **how large-scale social platforms protect their databases** from write-heavy operations like viral likes and comments. Uses the same architectural patterns as Instagram, YouTube, and Twitter.
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-20232A?style=flat&logo=react&logoColor=61DAFB)](https://reactjs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Kafka](https://img.shields.io/badge/Apache%20Kafka-231F20?style=flat&logo=apache-kafka&logoColor=white)](https://kafka.apache.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=flat&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white)](https://redis.io/)
 
-## 📋 Table of Contents
+---
 
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
+## 📋 Platform Features
 
-## 🎯 Overview
+This is a **fully functional social media platform** built as a foundation to showcase the notification architecture:
 
-An enterprise-grade notification system that combines real-time delivery, intelligent aggregation, and social platform features. Built with microservices architecture for scalability and maintainability.
+- **User Authentication** — Register, Login with JWT access tokens + refresh tokens, bcrypt password hashing
+- **Post Creation** — Users can create text posts visible to all other users
+- **Follow System** — Follow/Unfollow other users; Bell subscriptions (YouTube-style) for priority notifications
+- **Like System** — Like/Unlike posts with real-time count updates
+- **Comment System** — Comment on posts with nested reply support
+- **User Search** — Search for users by username across the platform
+- **Real-time Notifications** — WebSocket-powered instant notification delivery via Socket.IO
 
-### What Makes This Production-Ready
+> **Important**: The core purpose of this project is NOT just social media features — it is to demonstrate **how to architect a notification system that can handle millions of concurrent events without killing your database**.
 
-**Write-Through Caching with Batched Persistence**
-- Redis cache provides instant like/comment counts to frontend (<10ms reads)
-- PostgreSQL writes batched every 2 minutes to reduce DB load by 95%
-- Cache invalidation after batch write ensures data consistency
-- *Solves*: High-frequency write bottlenecks while maintaining real-time UX
+---
 
-**Event-Driven Architecture with Smart Aggregation**
-- Kafka-based async processing decouples services for horizontal scaling
-- Intelligent batching: 1-2 events instant, 3+ aggregated in 2-minute windows
-- Priority-based routing (CRITICAL/HIGH/LOW) with separate consumer groups
-- *Solves*: Notification fatigue and system overload during viral events
+## 🏗️ Architecture Overview
 
-**Multi-Channel Delivery with Fallback**
-- WebSocket for instant push, Email/SMS for offline users
-- Dead letter queue for failed deliveries with exponential backoff
-- User preference engine with DND mode and channel selection
-- *Solves*: Guaranteed delivery across heterogeneous client environments
-
-**Real-Time Database Monitoring**
-- Live admin dashboard showing batching behavior and system health
-- Separate read/write paths for analytics without impacting transactional load
-- *Solves*: Observability into async batch operations
-
-## ✨ Key Features
-
-### Notification System
-- **Real-time Delivery**: WebSocket push (<100ms latency)
-- **Smart Aggregation**: Time-windowed batching (2min) with instant feedback for low-volume events
-- **Multi-Channel**: Push, Email (SendGrid), SMS (Twilio)
-- **Priority Routing**: CRITICAL (instant), HIGH (social), LOW (marketing)
-- **User Preferences**: DND mode, channel selection, read/unread tracking
-
-### Social Platform
-- **Core Features**: Posts, Comments, Likes, Follows with real-time notifications
-- **Bell Subscriptions**: YouTube-style notifications for specific users
-- **Engagement**: Instant UI updates via Redis cache, batched DB persistence
-- **Profile Management**: User search, avatars, follower/following counts
-
-### Performance Optimizations
-- **Batched Writes**: 95% reduction in DB write operations
-- **Redis Cache**: <10ms read latency for social action counts
-- **Kafka Partitioning**: Parallel processing across consumer groups
-- **Connection Pooling**: Prisma connection management for PostgreSQL
-
-## 🏗️ Architecture
+The system is built as a **microservices architecture** with 5 independent services, connected via Apache Kafka as the central message bus.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend (React)                         │
-│  Login/Register • Feed • Posts • Profile • Notifications        │
-└────────────┬──────────────┬──────────────┬─────────────────────┘
-             │              │              │
-    ┌────────▼───────┐ ┌───▼──────────┐ ┌─▼──────────────┐
-    │  Social API    │ │ Notification │ │ Ingestion API  │
-    │   (3003)       │ │  API (3002)  │ │    (3001)      │
-    └────────┬───────┘ └───┬──────────┘ └─┬──────────────┘
-             │             │               │
-             │             │               │
-             └─────────────┴───────────────┘
-                           │
-                      ┌────▼─────┐
-                      │  Kafka   │
-                      │ raw-events│
-                      │   ready   │
-                      └────┬─────┘
-                           │
-          ┌────────────────┼────────────────┐
-          │                │                │
-     ┌────▼─────┐   ┌─────▼──────┐   ┌────▼─────┐
-     │Processing│   │   Socket   │   │  Email   │
-     │ Service  │   │  Service   │   │ Service  │
-     │          │   │   (3004)   │   │          │
-     └────┬─────┘   └─────┬──────┘   └────┬─────┘
-          │               │               │
-          │          WebSocket        SendGrid
-          │               │               │
-     ┌────▼─────┐   ┌────▼─────┐   ┌────▼─────┐
-     │PostgreSQL│   │  Redis   │   │   SMS    │
-     │          │   │  Cache   │   │ Service  │
-     │ Prisma   │   └──────────┘   └────┬─────┘
-     └──────────┘                       │
-                                     Twilio
+┌───────────────────────────────────────────────────────────────────────┐
+│                         React Frontend (Vite)                         │
+│  ┌──────────┐ ┌──────────────┐ ┌───────────────┐ ┌───────────────┐   │
+│  │ Post Feed│ │ Post Tester  │ │ Database      │ │ System        │   │
+│  │          │ │ (Sim Dials)  │ │ Viewer        │ │ Dashboard     │   │
+│  └──────────┘ └──────────────┘ └───────────────┘ └───────────────┘   │
+└────────────────────────┬──────────────────────────────────────────────┘
+                         │ HTTP + WebSocket
+        ┌────────────────┼────────────────────┐
+        ▼                ▼                    ▼
+┌──────────────┐ ┌──────────────┐    ┌──────────────┐
+│  Social API  │ │  Ingestion   │    │   Socket     │
+│  (Port 3003) │ │  Service     │    │   Service    │
+│              │ │  (Port 3000) │    │  (Port 4000) │
+│  Posts,Likes │ │  Kafka Prod  │    │  WebSocket   │
+│  Comments    │ │  + Fallback  │    │  Delivery    │
+│  Follows     │ │  Queue       │    │              │
+└──────┬───────┘ └──────┬───────┘    └──────▲───────┘
+       │                │                    │
+       │                ▼                    │
+       │     ┌─────────────────────┐         │
+       │     │    Apache Kafka     │         │
+       │     │  ┌───────────────┐  │         │
+       │     │  │ critical-     │  │         │
+       │     │  │ notifications │  │         │
+       │     │  ├───────────────┤  │         │
+       │     │  │ high-priority │  │         │
+       │     │  │ notifications │  │         │
+       │     │  ├───────────────┤  │         │
+       │     │  │ low-priority  │  │         │
+       │     │  │ notifications │  │         │
+       │     │  ├───────────────┤  │         │
+       │     │  │ ready-        │  │  Kafka  │
+       │     │  │ notifications │──┼─────────┘
+       │     │  └───────────────┘  │
+       │     └──────────┬──────────┘
+       │                │
+       │                ▼
+       │     ┌─────────────────────┐
+       │     │  Processing Service │
+       │     │  ┌───────────────┐  │
+       │     │  │ Aggregation   │  │
+       │     │  │ (Redis ZADD)  │  │
+       │     │  ├───────────────┤  │
+       │     │  │ Batch Writer  │  │
+       │     │  │ (Raw SQL)     │  │
+       │     │  ├───────────────┤  │
+       │     │  │ Priority      │  │
+       │     │  │ Router        │  │
+       │     │  └───────────────┘  │
+       │     └──────────┬──────────┘
+       │                │
+       ▼                ▼
+┌──────────────────────────────────┐
+│           Data Layer             │
+│  ┌──────────┐ ┌──────────┐      │
+│  │PostgreSQL│ │  Redis   │      │
+│  │ (Prisma) │ │  Cache   │      │
+│  │          │ │  (Counts)│      │
+│  └──────────┘ └──────────┘      │
+│  ┌──────────┐ ┌──────────────┐  │
+│  │ DynamoDB │ │ Notification │  │
+│  │  Local   │ │     API      │  │
+│  │ (Logs)   │ │  (Port 3002) │  │
+│  └──────────┘ └──────────────┘  │
+└──────────────────────────────────┘
 ```
 
-### Data Flow
+---
 
-1. **Event Generation**: User action (like, comment, follow) → Social API
-2. **Event Publishing**: Social API → Kafka (raw-events topic)
-3. **Processing**: Processing Service consumes events
-   - Checks user preferences
-   - Aggregates similar notifications
-   - Routes by priority
-4. **Delivery**: Multiple channels
-   - **Push**: Socket Service → WebSocket → Frontend
-   - **Email**: Email Service → SendGrid API
-   - **SMS**: SMS Service → Twilio API
-5. **Storage**: PostgreSQL stores notification history
-6. **Retrieval**: Notification API serves history to frontend
+## 🧠 Why This Tech Stack? (Design Decisions)
 
-## 🛠️ Tech Stack
+### 1. Why Kafka? (Not RabbitMQ / SQS)
 
-### Frontend
-| Technology | Purpose |
-|------------|---------|
-| **React 19** | UI framework with hooks |
-| **TypeScript** | Type safety |
-| **Vite** | Build tool & dev server |
-| **Tailwind CSS** | Utility-first styling |
-| **Socket.io Client** | WebSocket connection |
-| **Axios** | HTTP client |
+| Feature | Kafka | RabbitMQ |
+|---|---|---|
+| **Message Retention** | Keeps messages for 7 days on disk | Deletes after consumption |
+| **Replay Capability** | ✅ Can reprocess if a service crashes | ❌ Cannot replay |
+| **Throughput** | Millions/sec (partition-based) | Thousands/sec |
+| **Consumer Groups** | ✅ Multiple consumers read same topic | Requires exchange routing |
 
-### Backend
-| Technology | Purpose |
-|------------|---------|
-| **Node.js** | Runtime environment |
-| **TypeScript** | Type safety |
-| **Express** | REST API framework |
-| **Prisma ORM** | Database toolkit |
-| **Apache Kafka** | Message broker |
-| **Socket.io** | WebSocket server |
-| **JWT** | Authentication tokens |
-| **bcrypt** | Password hashing |
+**Our reasoning:** When a post goes viral, thousands of like events arrive per second. We need:
+- **Priority-based routing** → We use 4 Kafka topics: `critical-notifications` (OTP, security), `high-priority-notifications` (follows from verified users), `low-priority-notifications` (likes from non-followers), and `ready-notifications` (final delivery to Socket.IO).
+- **Replay capability** → If the `processing-service` crashes mid-aggregation, we can replay the Kafka log and re-aggregate without losing a single like.
+- **Separate consumer groups** → `critical-consumer`, `high-priority-consumer`, `low-priority-consumer` process events at different speeds.
 
-### Databases & Caching
-| Technology | Purpose |
-|------------|---------|
-| **PostgreSQL** | Primary database (batched writes every 2min) |
-| **Redis** | Write-through cache for instant counts + aggregation windows |
-| **DynamoDB** | Notification logs (optional) |
+### 2. Why Redis? (The Write-Through Cache)
 
-### External Services
-| Service | Purpose |
-|---------|---------|
-| **SendGrid** | Email delivery |
-| **Twilio** | SMS delivery |
+**The Core Problem**: If a post gets 10,000 likes in 1 second, writing each like to PostgreSQL immediately would:
+- Require 10,000 `INSERT` queries per second
+- Lock the `Like` table
+- Kill response times for all other users
 
-### DevOps
-| Tool | Purpose |
-|------|---------|
-| **Docker** | Containerization (Kafka KRaft mode) |
-| **Nodemon** | Auto-reload in dev |
-| **ts-node** | TypeScript execution |
-
-## 📁 Project Structure
+**Our Solution — Redis as a Write-Through Cache**:
 
 ```
-notification-system/
-├── backend/
-│   ├── ingestion-service/          # Event ingestion API
-│   │   ├── src/
-│   │   │   ├── app.ts              # Express server
-│   │   │   ├── config/kafka.ts     # Kafka producer
-│   │   │   └── controller/         # Event controllers
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── processing-service/         # Core notification processor
-│   │   ├── prisma/
-│   │   │   └── schema.prisma       # Database schema (shared)
-│   │   ├── src/
-│   │   │   ├── index.ts            # Kafka consumer
-│   │   │   ├── config/
-│   │   │   │   ├── kafka.ts
-│   │   │   │   └── redis.ts
-│   │   │   └── services/
-│   │   │       ├── aggregationService.ts  # Smart batching
-│   │   │       ├── preferenceService.ts   # User preferences
-│   │   │       └── dynamoService.ts       # Log storage
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── socket-service/             # Real-time push delivery
-│   │   ├── src/
-│   │   │   ├── server.ts           # Socket.io server
-│   │   │   └── services/
-│   │   │       └── kafkaConsumer.ts
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── email-service/              # Email delivery
-│   │   ├── src/
-│   │   │   ├── index.ts            # Kafka consumer
-│   │   │   └── services/
-│   │   │       └── emailService.ts # SendGrid integration
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── sms-service/                # SMS delivery
-│   │   ├── src/
-│   │   │   ├── index.ts
-│   │   │   └── services/
-│   │   │       └── smsService.ts   # Twilio integration
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── notification-api/           # Notification history API
-│   │   ├── src/
-│   │   │   └── app.ts              # REST endpoints
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── social-api/                 # Social platform API
-│   │   ├── src/
-│   │   │   ├── server.ts           # Express server
-│   │   │   ├── middleware/
-│   │   │   │   └── auth.ts         # JWT middleware
-│   │   │   ├── routes/
-│   │   │   │   ├── authRoutes.ts   # Login/Register
-│   │   │   │   ├── userRoutes.ts   # User management
-│   │   │   │   ├── postRoutes.ts   # Post CRUD (Redis cache reads)
-│   │   │   │   ├── commentRoutes.ts # Comments
-│   │   │   │   ├── followRoutes.ts  # Follow system
-│   │   │   │   └── testRoutes.ts    # Bulk simulation (Redis cache writes)
-│   │   │   └── utils/
-│   │   │       └── kafka.ts        # Event producer
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   └── shared/
-│       ├── types.ts                # Shared TypeScript types
-│       ├── prisma/                 # Shared Prisma schema
-│       └── services/
-│           └── redis-cache-service.ts  # Write-through cache for instant counts
-│
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx                 # Main app component
-│   │   ├── main.tsx                # Entry point
-│   │   ├── components/
-│   │   │   ├── Login.tsx           # Login form
-│   │   │   ├── Register.tsx        # Registration form
-│   │   │   ├── Navbar.tsx          # Navigation bar
-│   │   │   ├── Feed.tsx            # Post feed with real-time updates
-│   │   │   ├── UserProfile.tsx     # User profile with bell toggle
-│   │   │   ├── PostCreation.tsx    # Create post modal
-│   │   │   ├── PostTester.tsx      # Inline notification tester
-│   │   │   ├── BellToggle.tsx      # Bell subscription component
-│   │   │   ├── NotificationBell.tsx # Notification dropdown
-│   │   │   ├── NotificationItem.tsx # Notification card
-│   │   │   ├── NotificationTester.tsx # Testing interface
-│   │   │   ├── NotificationPreferences.tsx # Settings
-│   │   │   └── DatabaseViewer.tsx  # Real-time DB monitoring (batching proof)
-│   │   ├── context/
-│   │   │   ├── AuthContext.tsx     # Auth state
-│   │   │   └── SocketProvider.tsx  # WebSocket connection
-│   │   ├── hooks/
-│   │   │   ├── useAuth.ts          # Auth hook
-│   │   │   └── useSocket.ts        # Socket hook
-│   │   ├── config/
-│   │   │   └── api.ts              # API endpoints
-│   │   └── types/
-│   │       └── index.ts            # TypeScript types
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── tailwind.config.js
-│
-├── infra/                          # Infrastructure configs
-├── docker-compose.yml              # Kafka (KRaft mode), PostgreSQL, Redis, DynamoDB
-├── BACKEND_CONNECTIONS.md          # Service connections
-└── README.md                       # This file
+User clicks Like
+    │
+    ▼
+Redis INCR like:count:{postId}     ← Instant (< 1ms)
+    │                                  User sees updated count IMMEDIATELY
+    ▼
+Kafka produces LIKE event          ← Async, non-blocking
+    │
+    ▼
+Processing Service aggregates      ← Batches in Redis Sorted Set (ZADD)
+    │
+    ▼ (After 2 minutes OR threshold reached)
+    │
+Batch Writer: INSERT MANY to PostgreSQL  ← One transaction for 10,000 likes
+    │
+    ▼
+Redis cache cleared (clearPostCache)     ← Next read falls through to DB
 ```
+
+**How it works in code** (`redis-cache-service.ts`):
+- `incrementLikeCount(postId)` → Runs `INCR` on `like:count:{postId}` with a 3-minute TTL
+- `getLikeCount(postId)` → Reads from Redis first. On cache miss → falls back to PostgreSQL and warms the cache
+- `clearPostCache(postId)` → Called after the batch write to invalidate stale cache
+
+**Result**: The frontend always shows the correct like count (from Redis) but PostgreSQL only receives ONE batch write instead of 10,000 individual writes.
+
+### 3. Why PostgreSQL? (Not MongoDB / NoSQL)
+
+| Requirement | PostgreSQL | MongoDB |
+|---|---|---|
+| **Foreign Keys** (User→Post→Like→Comment) | ✅ Native | ❌ Manual |
+| **Cascade Deletes** (Delete user → delete all their posts) | ✅ `ON DELETE CASCADE` | ❌ Application code |
+| **ACID Transactions** (Batch write 1000 likes atomically) | ✅ Full support | ⚠️ Limited |
+| **Complex Joins** (Get posts with like counts and comment counts) | ✅ Single query | ❌ Multiple queries |
+
+**Our reasoning:** Social data is inherently **relational**. A Like belongs to a User AND a Post. A Comment belongs to a User AND a Post. A Follow connects TWO Users. NoSQL would require denormalization and manual reference management, which introduces bugs when data changes. PostgreSQL with Prisma ORM gives us type-safe relations and cascade behaviors out of the box.
+
+### 4. Why DynamoDB Local? (Notification Logging)
+
+Every notification attempt (sent/failed/filtered) is logged for auditing. This is:
+- **Append-only** — We never update or delete logs
+- **High volume** — Every like, comment, follow generates a log entry
+- **Schema-flexible** — Different notification types have different metadata
+
+DynamoDB's key-value model is perfect for this: write-once, read-rarely, massive volume. Using it locally for development avoids AWS costs while matching production patterns.
+
+---
+
+## ⚙️ Two Modes: Production vs. Testing
+
+### Production Mode (Default Behavior)
+
+The system uses **smart aggregation** to protect the database:
+
+| Scenario | Behavior | Why |
+|---|---|---|
+| **1–3 likes** on a post | **Instant notification** → "John liked your post" | Low volume, safe for DB |
+| **4+ likes** on a post | **Batched notification** → "John and 4 others liked your post" (after ~2 min) | High volume, protect DB |
+| **Any comments** | **Always batched** → "3 people commented on your post" (after ~60-120s) | Comments always aggregated |
+| **Follows** | **Instant notification** | One-time event, safe for DB |
+| **OTP / Security alerts** | **Critical priority** → Instant, bypasses aggregation entirely | Must never be delayed |
+
+The aggregation window is **2 minutes** (`AGGREGATION_WINDOW_SECONDS = 120` in `aggregationService.ts`). The instant-like threshold is **3** (`INSTANT_LIKE_THRESHOLD = 3`).
+
+### Testing Mode (Built-In Frontend Testing Controls)
+
+The frontend includes **two built-in testing interfaces** that let you observe the batching behavior in real-time:
+
+#### 🎛️ Post Tester (Simulation Dials)
+
+Located **below each post** in the feed, the `PostTester` component provides:
+
+- **Like Slider (1–15)** → Drag to set how many simulated users will like the post
+  - **Green indicator**: 1–3 likes → Shows "Instant: Immediate delivery"
+  - **Yellow indicator**: 4+ likes → Shows "Batched: ~60s wait"
+- **Comment Slider (1–10)** → Drag to set how many simulated comments
+  - Always shows "Batched: Comments wait for 60s aggregation window"
+- **Simulation Type** → Choose between Mixed / Followers Only / Non-Followers Only
+  - This controls whether test users follow the post owner before liking (affects notification priority)
+- **Cleanup Button** → Deletes all test users and their data
+
+**These are real backend requests** — they create actual test users in PostgreSQL, generate real Kafka events, and flow through the entire notification pipeline. They are NOT frontend mocks.
+
+#### 📊 Database Monitor (Database Viewer Page)
+
+A dedicated page (`/database`) that shows the **raw PostgreSQL tables** in real-time:
+
+- **4 Tabs**: Notification History, Likes, Comments, Follows
+- **Auto-refresh every 3 seconds** (configurable toggle)
+- **Stats cards** showing total counts and recent additions (last 5 minutes)
+- **Clear All Data** button for resetting test data
+
+**How to test the batching behavior:**
+1. Create a post
+2. Open the Post Tester below it
+3. Set likes to **2** → Send → Notice the Database Viewer shows the Like record **immediately**
+4. Set likes to **8** → Send → Notice the likes appear in the frontend count **instantly** (Redis), but the Database Viewer **does not show new Like records for ~2 minutes** (batched write)
+5. Wait ~2 minutes → Refresh Database Viewer → The 8 likes now appear in PostgreSQL
+
+#### 🖥️ System Dashboard
+
+A pipeline visualization showing:
+- **Service Health** — Real-time health checks for all services (green/red/yellow status)
+- **Pipeline Animation** — Visual flow showing events moving through Trigger → Ingestion → Processing → Delivery
+- **Stats** — Total notifications, users, fallback queue pending/failed
+- **Demo Buttons** — Simulate Like/Comment/Follow/OTP events through the animated pipeline
+
+---
+
+## 🛡️ Fallback Strategies & Reliability
+
+### Kafka Fallback (✅ IMPLEMENTED)
+
+**If Kafka goes down**, the system does NOT lose events. The `ingestion-service` has a **fully implemented PostgreSQL-backed fallback queue**:
+
+**How it works** (`fallbackService.ts` + `producerService.ts`):
+
+1. `producerService.sendEvent()` first attempts to send via Kafka
+2. If Kafka fails → automatically calls `storeInFallback()` which writes the event to the `KafkaFallbackQueue` table in PostgreSQL
+3. The `KafkaFallbackQueue` stores: event payload, retry count (max 5 retries), topic, processed flag, timestamps
+4. When Kafka recovers → unprocessed events can be retrieved via `getUnprocessedEvents()` and replayed
+5. The System Dashboard shows `Pending Fallback` and `Failed Fallback` counts in real-time
+
+**Additionally**: Both `ingestion-service` and `socket-service` have **retry logic with exponential backoff** for Kafka connections and topic subscriptions, so they don't crash on startup if Kafka isn't ready yet.
+
+### Redis Fallback (✅ IMPLEMENTED)
+
+**If Redis goes down** for read operations:
+
+- `getLikeCount()` / `getCommentCount()` / `getFollowCount()` all **fall back to querying PostgreSQL directly** on cache miss
+- The aggregation service has a fallback: if Redis aggregation fails during processing, the notification is **sent immediately** instead of being queued (`catch → return { shouldSendNow: true }` in `aggregationService.ts`)
+
+**If Redis goes down** for write operations:
+- Cache increments (`INCR`) will fail, but the Kafka event is still produced independently
+- The batch write still happens via Kafka → Processing Service → PostgreSQL, just without the instant cache benefit
+
+### Thundering Herd Problem
+
+**Partially addressed:**
+
+| Aspect | Status | Details |
+|---|---|---|
+| **Redis SCAN vs KEYS** | ✅ Present | Uses `SCAN` during flush cycles to avoid blocking the Redis single-thread |
+| **Priority-based consumer groups** | ✅ Present | Critical, High, and Low priority consumers prevent all events from hitting one queue |
+| **Batched writes** | ✅ Present | The 2-minute aggregation window inherently spreads DB load over time |
+| **Jitter / Staggered timers** | ❌ Not present | All aggregation windows close at fixed intervals (every 2 min). In hyperscale, this creates periodic CPU spikes. Adding random jitter (e.g., ±30 seconds) would smooth this out |
+| **Circuit breaker pattern** | ❌ Not present | No automatic circuit breaking if downstream services are overloaded |
+
+---
+
+## ❓ FAQ (Honest Answers Based on the Actual Codebase)
+
+### Q1: How does the like count show instantly if it's not written to the database?
+
+**Answer:** When you like a post, TWO things happen simultaneously:
+1. **Redis `INCR like:count:{postId}`** — The like count key in Redis is incremented (<1ms). The frontend reads counts from Redis via the API, so the user sees the updated count **immediately**.
+2. **Kafka event produced** — The LIKE event is sent to Kafka for async processing.
+
+The actual `Like` row in PostgreSQL is written later during the batch flush (every 2 minutes). So the user sees "5 likes" instantly, but if you check the DB table directly, it might still show "0 likes" until the batch runs.
+
+### Q2: What happens if the server crashes between Redis increment and the batch write?
+
+**Answer:** If the `processing-service` crashes:
+- Redis has a 3-minute TTL on cache keys (`CACHE_TTL = 180`). The cached count will eventually expire.
+- Kafka retains the unprocessed LIKE events for 7 days. When the processing-service restarts, it picks up where it left off (Kafka consumer group offset tracking).
+- **Worst case**: The like count in Redis might temporarily show a higher number than PostgreSQL. After the cache TTL expires, the next read falls through to PostgreSQL and the cache is warmed with the correct DB value.
+
+### Q3: Why not use a simple queue like Bull/BullMQ instead of Kafka?
+
+**Answer:** Bull uses Redis as its backend, which means:
+- No message retention — If Redis crashes, queued jobs are lost
+- Single-node throughput — No partition-based parallelism
+- No replay — Cannot reprocess past events
+
+Kafka gives us: durable log storage, partition-based scaling, consumer groups, and 7-day message retention — all critical for a notification system that cannot afford to lose events.
+
+### Q4: How does the follower-based priority work?
+
+**Answer:** In `aggregationService.ts`, when processing a LIKE event:
+- If the liker **follows** the post owner → Higher priority batching (shown with priority in the notification)
+- If the liker **does not follow** the post owner → Lower priority (waits for full aggregation window)
+
+The frontend testing dials let you simulate this: choose "Followers" to create test users that follow the post owner first, or "Non-Followers" to skip the follow step.
+
+### Q5: Why are comments always batched and never instant?
+
+**Answer:** Unlike likes (which are a simple boolean toggle), comments contain **text content** that can trigger discussions. If 10 people comment in rapid succession, sending 10 separate notifications ("Person A commented", "Person B commented"...) would be spammy. Instead, the system waits for the aggregation window and sends ONE notification: "Person A and 9 others commented on your post".
+
+### Q6: How does the KafkaFallbackQueue work in detail?
+
+**Answer:** The `KafkaFallbackQueue` table in PostgreSQL has these fields:
+- `eventId` — The original notification event ID
+- `topic` — Which Kafka topic it was meant for
+- `payload` — The full serialized event data (JSON)
+- `processed` — Boolean flag (false = needs retry)
+- `retryCount` — Number of failed attempts (max 5 before marked as permanently failed)
+- `createdAt` / `processedAt` — Timestamps for auditing
+
+When Kafka is unavailable, `producerService.ts` catches the error and calls `storeInFallback()`. The system dashboard's "Pending Fallback" counter shows how many events are waiting to be replayed.
+
+### Q7: Could this handle Instagram-scale traffic?
+
+**Answer:** The architecture patterns are correct (this is how Instagram actually works), but a true production deployment would need:
+- **Kafka cluster** (3+ brokers with replication, not the single-broker docker setup)
+- **Redis Cluster** (sharded across multiple nodes)
+- **PostgreSQL read replicas** (separate read and write traffic)
+- **Kubernetes** for horizontal scaling of microservices
+- **Jitter on aggregation timers** (not yet implemented)
+- **Circuit breakers** (not yet implemented)
+
+The single-Docker-Compose setup is designed for **demonstrating the architecture**, not handling actual Instagram traffic.
+
+### Q8: Why separate ingestion-service and processing-service?
+
+**Answer:** **Decoupling producers from consumers.** The ingestion-service only does one thing: receive HTTP events and put them on Kafka (or the fallback queue). It doesn't care about aggregation logic, priority routing, or database writes. This means:
+- If the processing-service crashes → events are safely stored in Kafka
+- If the ingestion-service is overloaded → processing continues from the Kafka backlog
+- They can be scaled independently (e.g., 3 ingestion replicas, 1 processing replica)
+
+### Q9: What databases does this project use and why?
+
+**Answer:**
+| Database | Purpose | Why Not Something Else |
+|---|---|---|
+| **PostgreSQL** | Users, Posts, Likes, Comments, Follows, Notifications | Relational data needs foreign keys and ACID transactions |
+| **Redis** | Like/Comment/Follow counts (cache), aggregation windows (sorted sets) | Sub-millisecond reads for instant UI updates |
+| **DynamoDB Local** | Notification delivery logs (sent/failed/filtered) | High-volume append-only logs, schema-flexible |
+| **Kafka** | Event queue (not a database, but stores events for 7 days) | Durable event log with replay capability |
+
+### Q10: How is the batch write actually performed?
+
+**Answer:** The `batchWriteService.ts` in `processing-service` uses **raw SQL** (not Prisma's ORM methods) for performance:
+- `batchWriteLikes(events)` → Collects all like events in the window → runs a single `INSERT MANY` transaction
+- `batchWriteComments(events)` → Same pattern for comments
+- `batchWriteFollows(events)` → Same pattern for follows
+- After each batch write → calls `clearPostCache(postId)` to invalidate the Redis cache
+
+This means 1,000 likes become 1 database transaction instead of 1,000 individual `INSERT` statements.
+
+### Q11: Is there any rate limiting?
+
+**Answer:** There is no explicit rate limiting implemented in the API layer. However, the batching architecture inherently acts as a form of rate limiting for database writes — no matter how many events arrive, the DB only receives batch writes every 2 minutes.
+
+### Q12: How does the System Dashboard get its real-time data?
+
+**Answer:** The `SystemDashboard.tsx` component:
+- Polls health endpoints (`/health`) on each service every 5 seconds to show online/offline status
+- Fetches admin stats from the `notification-api` every 10 seconds (total notifications, users, fallback queue status)
+- Has demo buttons that trigger **simulated** pipeline animations (these are visual only, not actual events)
+
+---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
+- Node.js (v18+)
+- Docker & Docker Compose
+- npm or yarn
 
-- **Node.js** 18+ and npm
-- **PostgreSQL** 14+
-- **Redis** 6+
-- **Docker** & Docker Compose (for Kafka)
-- **SendGrid API Key** (optional for email)
-- **Twilio Account** (optional for SMS)
-
-### Installation
-
-#### 1. Clone Repository
-
-```bash
-git clone https://github.com/Biku2004/Intelligent-Notification-Service.git
-cd notification-system
-```
-
-#### 2. Start Infrastructure (Kafka KRaft, PostgreSQL, Redis, DynamoDB)
+### 1. Start Infrastructure
 
 ```bash
 docker-compose up -d
 ```
 
-#### 3. Setup Database
+This starts: PostgreSQL, Kafka (KRaft mode), Redis, DynamoDB Local.
+
+### 2. Setup Database
 
 ```bash
-cd backend/processing-service
-
-# Create PostgreSQL database
-createdb notification_system
-
-# Set environment variables
-echo "DATABASE_URL=postgresql://username:password@localhost:5432/notification_system" > .env
-
-# Run migrations
-npx prisma migrate dev --name init
+cd backend/shared
+npx prisma migrate dev
 npx prisma generate
 ```
 
-#### 4. Install Dependencies
+### 3. Start All Services
 
 ```bash
-# Backend services
-cd backend/ingestion-service && npm install
-cd ../processing-service && npm install
-cd ../socket-service && npm install
-cd ../email-service && npm install
-cd ../sms-service && npm install
-cd ../notification-api && npm install
-cd ../social-api && npm install
-
-# Frontend
-cd ../../frontend && npm install
+npm run start:all
 ```
 
-#### 5. Configure Environment Variables
+This concurrently starts all backend services using the `start-all.js` script.
 
-Create `.env` files in each service directory:
-
-**backend/social-api/.env**:
-```env
-PORT=3003
-DATABASE_URL=postgresql://username:password@localhost:5432/notification_system
-JWT_SECRET=your-super-secret-jwt-key
-JWT_EXPIRES_IN=7d
-KAFKA_BROKERS=localhost:9092
-```
-
-**backend/notification-api/.env**:
-```env
-PORT=3002
-DATABASE_URL=postgresql://username:password@localhost:5432/notification_system
-```
-
-**backend/processing-service/.env**:
-```env
-DATABASE_URL=postgresql://username:password@localhost:5432/notification_system
-REDIS_HOST=localhost
-REDIS_PORT=6379
-KAFKA_BROKERS=localhost:9092
-```
-
-**backend/email-service/.env**:
-```env
-SENDGRID_API_KEY=your-sendgrid-api-key
-FROM_EMAIL=noreply@yourdomain.com
-KAFKA_BROKERS=localhost:9092
-```
-
-**backend/sms-service/.env**:
-```env
-TWILIO_ACCOUNT_SID=your-twilio-account-sid
-TWILIO_AUTH_TOKEN=your-twilio-auth-token
-TWILIO_PHONE_NUMBER=+1234567890
-KAFKA_BROKERS=localhost:9092
-```
-
-#### 6. Start Services
-
-Open 7 terminal windows:
+### 4. Start Frontend
 
 ```bash
-# Terminal 1 - Processing Service
-cd backend/processing-service
-npm run dev
-
-# Terminal 2 - Ingestion API
-cd backend/ingestion-service
-npm run dev
-
-# Terminal 3 - Socket Service
-cd backend/socket-service
-npm run dev
-
-# Terminal 4 - Notification API
-cd backend/notification-api
-npm run dev
-
-# Terminal 5 - Social API
-cd backend/social-api
-npm run dev
-
-# Terminal 6 - Email Service (optional)
-cd backend/email-service
-npm run dev
-
-# Terminal 7 - Frontend
 cd frontend
 npm run dev
 ```
 
-#### 7. Access Application
-
-- **Frontend**: http://localhost:5173
-- **Social API**: http://localhost:3003
-- **Notification API**: http://localhost:3002
-- **Ingestion API**: http://localhost:3001
-- **Socket Service**: ws://localhost:3004
-
-## 📚 API Documentation
-
-### Authentication Endpoints
-
-#### POST /api/auth/register
-Register a new user.
-
-```bash
-curl -X POST http://localhost:3003/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "username": "john_doe",
-    "password": "password123",
-    "name": "John Doe"
-  }'
-```
-
-**Response**:
-```json
-{
-  "success": true,
-  "user": {
-    "id": "uuid",
-    "email": "user@example.com",
-    "username": "john_doe",
-    "name": "John Doe"
-  },
-  "token": "jwt-token"
-}
-```
-
-#### POST /api/auth/login
-Login existing user.
-
-```bash
-curl -X POST http://localhost:3003/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "password": "password123"
-  }'
-```
-
-### Social Endpoints
-
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| GET | `/api/users/:userId` | Get user profile | Optional |
-| PATCH | `/api/users/:userId` | Update profile | Required |
-| GET | `/api/users?q=search` | Search users | No |
-| POST | `/api/posts` | Create post | Required |
-| GET | `/api/posts` | Get feed | Optional |
-| POST | `/api/posts/:postId/like` | Like/unlike | Required |
-| POST | `/api/comments` | Add comment | Required |
-| GET | `/api/comments?postId=id` | Get comments | No |
-| POST | `/api/follows/:userId` | Follow/unfollow | Required |
-| GET | `/api/follows/:userId/followers` | Get followers | No |
-| POST | `/api/follows/:userId/bell` | Toggle bell | Required |
-
-### Notification Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/notifications/:userId` | Get notification history |
-| PATCH | `/api/notifications/:notificationId/read` | Mark as read |
-| PATCH | `/api/notifications/:userId/read-all` | Mark all as read |
-| GET | `/api/preferences/:userId` | Get preferences |
-| PATCH | `/api/preferences/:userId` | Update preferences |
-
-
-
-## 📝 License
-
-This project is licensed under the ISC License.
-
-## 👥 Authors
-
-- **Biku2004** - [GitHub](https://github.com/Biku2004)
-
-## 🙏 Acknowledgments
-
-- React & Node.js communities
-- Apache Kafka documentation
-- Prisma ORM team
-- Socket.io contributors
+The frontend runs on `http://localhost:5173`.
 
 ---
 
-**⭐ Star this repo if you find it helpful!**
+## 📂 Project Structure
 
+```
+notification-system/
+│
+├── 📁 frontend/                                    # React + Vite Frontend (Port 5173)
+│   └── src/
+│       ├── App.tsx                                  # Main app — routing, layout, auth guards
+│       ├── main.tsx                                 # Vite entry point
+│       ├── index.css                                # Global styles
+│       │
+│       ├── components/
+│       │   ├── Feed.tsx                             # Post feed — displays all posts with like/comment counts
+│       │   ├── PostCreation.tsx                     # Create new post form
+│       │   ├── PostTester.tsx                       # 🎛️ Simulation dials (like/comment sliders per post)
+│       │   ├── Login.tsx                            # Login form with JWT auth
+│       │   ├── Register.tsx                         # User registration form
+│       │   ├── Navbar.tsx                           # Top navigation bar
+│       │   ├── UserProfile.tsx                      # User profile page with follow/unfollow
+│       │   ├── NotificationBell.tsx                 # 🔔 Real-time notification dropdown (WebSocket)
+│       │   ├── NotificationItem.tsx                 # Individual notification card renderer
+│       │   ├── NotificationPreferences.tsx          # Per-user notification settings
+│       │   ├── NotificationTester.tsx               # Manual notification testing panel
+│       │   ├── BellToggle.tsx                       # YouTube-style bell subscription toggle
+│       │   ├── ConnectionStatus.tsx                 # WebSocket connection indicator
+│       │   ├── SystemDashboard.tsx                  # 🖥️ Pipeline visualization + service health
+│       │   ├── ToastNotification.tsx                # Pop-up notification toasts
+│       │   └── ErrorBoundary.tsx                    # React error boundary wrapper
+│       │
+│       ├── pages/
+│       │   └── DatabaseViewer.tsx                   # 📊 Raw PostgreSQL table viewer (auto-refresh 3s)
+│       │
+│       ├── context/
+│       │   ├── AuthContext.tsx                      # JWT auth state (login, logout, token refresh)
+│       │   ├── SocketProvider.tsx                   # Socket.IO connection + event listeners
+│       │   ├── socketContextState.ts                # Socket context type definitions
+│       │   └── AppModeContext.tsx                   # Production vs Testing mode toggle
+│       │
+│       ├── hooks/
+│       │   ├── useAuth.ts                           # Auth context hook
+│       │   └── useSocket.ts                         # Socket context hook
+│       │
+│       ├── config/
+│       │   └── api.ts                               # API base URLs for all backend services
+│       │
+│       └── types/
+│           └── index.ts                             # Shared TypeScript interfaces (Post, User, Notification)
+│
+├── 📁 backend/
+│   │
+│   ├── 📁 social-api/                              # Port 3003 — Core Social Platform API
+│   │   └── src/
+│   │       ├── server.ts                            # Express server setup + route mounting
+│   │       ├── config/
+│   │       │   └── env.ts                           # Environment variable loader
+│   │       ├── middleware/
+│   │       │   └── auth.ts                          # JWT authentication middleware
+│   │       ├── routes/
+│   │       │   ├── authRoutes.ts                    # POST /register, /login, /refresh-token
+│   │       │   ├── postRoutes.ts                    # CRUD /posts — creates posts, gets feed
+│   │       │   ├── commentRoutes.ts                 # POST/GET /comments — nested replies
+│   │       │   ├── followRoutes.ts                  # POST /follow, /unfollow, /bell-subscribe
+│   │       │   ├── userRoutes.ts                    # GET /users/search, /users/:id
+│   │       │   ├── bookmarkRoutes.ts                # POST/DELETE /bookmarks
+│   │       │   ├── preferencesRoutes.ts             # GET/PUT notification preferences
+│   │       │   └── testRoutes.ts                    # 🧪 /simulate-likes, /simulate-comments, /cleanup
+│   │       └── utils/
+│   │           └── kafka.ts                         # Kafka producer for publishing social events
+│   │
+│   ├── 📁 ingestion-service/                       # Port 3000 — Event Ingestion + Kafka Producer
+│   │   └── src/
+│   │       ├── app.ts                               # Express server + Kafka producer init
+│   │       ├── config/
+│   │       │   └── kafka.ts                         # KafkaJS client config + retry connection
+│   │       ├── controller/
+│   │       │   └── eventController.ts               # POST /events — receives notification events
+│   │       ├── routes/
+│   │       │   └── eventRoutes.ts                   # Route definitions for /events
+│   │       └── services/
+│   │           ├── producerService.ts               # 🔄 Kafka send + automatic PostgreSQL fallback
+│   │           └── fallbackService.ts               # 📦 KafkaFallbackQueue CRUD (store, retrieve, retry)
+│   │
+│   ├── 📁 processing-service/                      # Kafka Consumer — Aggregation Engine
+│   │   └── src/
+│   │       ├── index.ts                             # Main entry — 3 consumer groups (Critical/High/Low)
+│   │       ├── config/
+│   │       │   ├── kafka.ts                         # KafkaJS client config
+│   │       │   ├── redis.ts                         # Redis (ioredis) client config
+│   │       │   └── initTopics.ts                    # Creates 4 Kafka topics on startup
+│   │       ├── services/
+│   │       │   ├── aggregationService.ts            # 🧠 Core: Redis ZADD aggregation + instant vs batched logic
+│   │       │   ├── batchWriteService.ts             # 💾 Raw SQL batch INSERT for likes/comments/follows
+│   │       │   ├── dynamoService.ts                 # DynamoDB notification log writer
+│   │       │   └── preferenceService.ts             # User preference checker (do-not-disturb, channels)
+│   │       └── scripts/
+│   │           └── initDynamoDB.ts                  # Creates DynamoDB tables on first run
+│   │
+│   ├── 📁 notification-api/                        # Port 3002 — Notification History + Admin
+│   │   └── src/
+│   │       ├── app.ts                               # Express server + all admin/notification routes
+│   │       ├── middleware/
+│   │       │   └── auth.ts                          # JWT auth middleware
+│   │       └── routes/
+│   │           └── adminRoutes.ts                   # GET /admin/stats, /admin/db/:table, DELETE /admin/db/clear
+│   │
+│   ├── 📁 socket-service/                          # Port 4000 — WebSocket Delivery
+│   │   └── src/
+│   │       ├── server.ts                            # HTTP + Socket.IO server, JWT room auth
+│   │       ├── config/
+│   │       │   └── env.ts                           # Environment variable loader
+│   │       └── services/
+│   │           └── kafkaConsumer.ts                  # Consumes 'ready-notifications' → emits to Socket.IO rooms
+│   │
+│   └── 📁 shared/                                  # Shared code across all backend services
+│       ├── types.ts                                 # NotificationEvent, Priority, Channel types
+│       ├── retryHandler.ts                          # Generic retry with exponential backoff
+│       ├── prisma/
+│       │   ├── schema.prisma                        # 📐 Full DB schema (User, Post, Like, Comment, Follow, etc.)
+│       │   ├── migrations/                          # PostgreSQL migration history
+│       │   └── generated/                           # Prisma Client (auto-generated)
+│       ├── services/
+│       │   └── redis-cache-service.ts               # ⚡ Write-through cache (INCR, GET with DB fallback, TTL)
+│       ├── middleware/
+│       │   └── tracing.ts                           # Request tracing middleware
+│       └── utils/
+│           └── logger.ts                            # Centralized logger utility
+│
+├── 📁 scripts/                                     # Development & testing utilities
+│   ├── start-all.js                                 # 🚀 Concurrent launcher for all backend services
+│   ├── setup-prisma.js                              # Prisma migration + generate helper
+│   ├── diagnose-pipeline.js                         # End-to-end pipeline health checker
+│   ├── test-aggregation.js                          # Automated aggregation behavior tests
+│   ├── test-high-priority-consumer.js               # High-priority consumer test
+│   ├── check-offsets.js                             # Kafka consumer offset inspector
+│   └── TESTING.md                                   # Testing guide documentation
+│
+├── 📁 infra/                                       # Infrastructure configuration
+│   ├── DOCKER_SETUP.md                              # Docker setup documentation
+│   └── postgres-init.sql                            # Initial PostgreSQL schema seed
+│
+├── docker-compose.yml                               # 🐳 Kafka (KRaft), PostgreSQL, Redis, DynamoDB Local
+├── package.json                                     # Root package — workspace scripts
+└── .env                                             # Environment variables (DB URLs, JWT secrets, ports)
+```
+
+---
+
+## 📜 License
+
+MIT
