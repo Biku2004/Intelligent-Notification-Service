@@ -225,14 +225,14 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onCreat
                 >
                   <FlaskConical size={22} />
                 </button>
-                <button
+                {/* <button
                   onClick={() => onNavigate('dashboard')}
                   className={`p-2 rounded-lg transition-colors ${currentPage === 'dashboard' ? 'bg-gray-800 text-cyan-400' : 'hover:bg-gray-800 text-cyan-500'}`}
                   aria-label="System Dashboard"
                   title="System Dashboard"
                 >
                   <LayoutDashboard size={22} />
-                </button>
+                </button> */}
                 <button
                   onClick={() => onNavigate('database')}
                   className={`p-2 rounded-lg transition-colors ${currentPage === 'database' ? 'bg-gray-800 text-orange-400' : 'hover:bg-gray-800 text-orange-500'}`}
